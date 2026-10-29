@@ -141,8 +141,8 @@ tasks.named('test') {
     '--enable-native-access=ALL-UNNAMED',
   ]
   testLogging {
-    events 'failed'
-    exceptionFormat 'full'
+    events = ['failed']
+    exceptionFormat = 'full'
   }
 }
 
@@ -177,8 +177,8 @@ tasks.register('integrationTest', Test) {
   // Always re-run: the Besu installation is not tracked by Gradle.
   outputs.upToDateWhen { false }
   testLogging {
-    events 'passed', 'skipped', 'failed'
-    exceptionFormat 'full'
+    events = ['passed', 'skipped', 'failed']
+    exceptionFormat = 'full'
   }
 }
 
@@ -224,8 +224,24 @@ def verifyDistribution = tasks.register('verifyDistribution') {
   }
 }
 
+// The README documents the Besu version the plugin is built against.
+def verifyReadmeBesuVersion = tasks.register('verifyReadmeBesuVersion') {
+  description = 'Verifies that README.md names the Besu version from gradle/libs.versions.toml.'
+  group = 'verification'
+  def expected = libs.versions.besu.asProvider().get()
+  def readmeFile = layout.projectDirectory.file('README.md').asFile
+  inputs.file(readmeFile)
+  inputs.property('expectedVersion', expected)
+  doLast {
+    if (!readmeFile.text.contains("`${expected}`")) {
+      throw new GradleException(
+      "README.md does not mention the Besu version `${expected}` from gradle/libs.versions.toml. Update README.md.")
+    }
+  }
+}
+
 tasks.named('check') {
-  dependsOn verifyDistribution
+  dependsOn verifyDistribution, verifyReadmeBesuVersion
 }
 
 publishing {

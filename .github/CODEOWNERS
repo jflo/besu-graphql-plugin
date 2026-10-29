@@ -1,0 +1,4 @@
+# Code owners are requested for review on every pull request.
+# Placeholder until a maintenance team adopts the repository (see MAINTAINERS.md): replace with the
+# team, e.g. `* @besu-eth/graphql-plugin-maintainers`.
+* @jflo
