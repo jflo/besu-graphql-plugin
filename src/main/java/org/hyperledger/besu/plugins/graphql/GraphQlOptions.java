@@ -19,6 +19,7 @@ import static org.hyperledger.besu.plugins.graphql.GraphQLConfiguration.DEFAULT_
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
 
 import com.google.common.base.Strings;
@@ -26,10 +27,39 @@ import org.slf4j.Logger;
 import picocli.CommandLine;
 
 /**
- * Handles configuration options for the GraphQL HTTP service in Besu. The options have the same
- * names, defaults and descriptions as when the GraphQL service was part of Besu's core.
+ * Handles configuration options for the GraphQL HTTP service in Besu. The options are named {@code
+ * --plugin-graphql-*}, as Besu requires for the options of a plugin, and have the same defaults,
+ * descriptions and validation as the {@code --graphql-*} options of the GraphQL service that used
+ * to be part of Besu's core. When Besu allows it, the options are also registered under those
+ * legacy names, see {@link GraphQLCliOptions}.
+ *
+ * <p>The methods that report option names take a function that maps the name of an option to the
+ * name the user gave it, so that messages name the option the way the user wrote it.
  */
 public class GraphQlOptions {
+
+  /** The prefix of the option names. */
+  public static final String OPTION_PREFIX = "--plugin-graphql-";
+
+  /**
+   * The prefix of the deprecated option names, which the options had when the GraphQL service was
+   * part of Besu's core.
+   */
+  public static final String LEGACY_OPTION_PREFIX = "--graphql-";
+
+  /** The name of the option that enables the GraphQL HTTP service. */
+  public static final String HTTP_ENABLED = OPTION_PREFIX + "http-enabled";
+
+  static final String HTTP_HOST = OPTION_PREFIX + "http-host";
+  static final String HTTP_PORT = OPTION_PREFIX + "http-port";
+  static final String HTTP_CORS_ORIGINS = OPTION_PREFIX + "http-cors-origins";
+  static final String TLS_ENABLED = OPTION_PREFIX + "tls-enabled";
+  static final String TLS_KEYSTORE_FILE = OPTION_PREFIX + "tls-keystore-file";
+  static final String TLS_KEYSTORE_PASSWORD_FILE = OPTION_PREFIX + "tls-keystore-password-file";
+  static final String MTLS_ENABLED = OPTION_PREFIX + "mtls-enabled";
+  static final String TLS_TRUSTSTORE_FILE = OPTION_PREFIX + "tls-truststore-file";
+  static final String TLS_TRUSTSTORE_PASSWORD_FILE = OPTION_PREFIX + "tls-truststore-password-file";
+  static final String MAX_BLOCKS_RANGE = OPTION_PREFIX + "max-blocks-range";
 
   private static final String MANDATORY_HOST_FORMAT_HELP = "<HOST>";
   private static final String MANDATORY_PORT_FORMAT_HELP = "<PORT>";
@@ -37,65 +67,62 @@ public class GraphQlOptions {
   private static final String DEPENDENCY_WARNING_MSG =
       "{} has been ignored because {} was not defined on the command line.";
 
-  static final String MAX_BLOCKS_RANGE_ERROR =
-      "--graphql-max-blocks-range must be >= 0 (0 specifies no limit)";
-
   @CommandLine.Option(
-      names = {"--graphql-http-enabled"},
+      names = {HTTP_ENABLED},
       description = "Set to start the GraphQL HTTP service (default: ${DEFAULT-VALUE})")
   private final Boolean isGraphQLHttpEnabled = false;
 
   @SuppressWarnings({"FieldCanBeFinal", "FieldMayBeFinal"}) // PicoCLI requires non-final Strings.
   @CommandLine.Option(
-      names = {"--graphql-http-host"},
+      names = {HTTP_HOST},
       paramLabel = MANDATORY_HOST_FORMAT_HELP,
       description = "Host for GraphQL HTTP to listen on (default: ${DEFAULT-VALUE})")
   private String graphQLHttpHost;
 
   @CommandLine.Option(
-      names = {"--graphql-http-port"},
+      names = {HTTP_PORT},
       paramLabel = MANDATORY_PORT_FORMAT_HELP,
       description = "Port for GraphQL HTTP to listen on (default: ${DEFAULT-VALUE})")
   private final Integer graphQLHttpPort = DEFAULT_GRAPHQL_HTTP_PORT;
 
   @CommandLine.Option(
-      names = {"--graphql-http-cors-origins"},
+      names = {HTTP_CORS_ORIGINS},
       description = "Comma separated origin domain URLs for CORS validation (default: none)")
   private final CorsAllowedOriginsProperty graphQLHttpCorsAllowedOrigins =
       new CorsAllowedOriginsProperty();
 
   @CommandLine.Option(
-      names = {"--graphql-tls-enabled"},
+      names = {TLS_ENABLED},
       description = "Enable TLS for GraphQL HTTP service")
   private Boolean graphqlTlsEnabled = false;
 
   @CommandLine.Option(
-      names = {"--graphql-tls-keystore-file"},
+      names = {TLS_KEYSTORE_FILE},
       description = "Path to the TLS keystore file for GraphQL HTTP service")
   private String graphqlTlsKeystoreFile;
 
   @CommandLine.Option(
-      names = {"--graphql-tls-keystore-password-file"},
+      names = {TLS_KEYSTORE_PASSWORD_FILE},
       description = "Path to the file containing the password for the TLS keystore")
   private String graphqlTlsKeystorePasswordFile;
 
   @CommandLine.Option(
-      names = {"--graphql-mtls-enabled"},
+      names = {MTLS_ENABLED},
       description = "Enable mTLS for GraphQL HTTP service")
   private Boolean graphqlMtlsEnabled = false;
 
   @CommandLine.Option(
-      names = {"--graphql-tls-truststore-file"},
+      names = {TLS_TRUSTSTORE_FILE},
       description = "Path to the TLS truststore file for GraphQL HTTP service")
   private String graphqlTlsTruststoreFile;
 
   @CommandLine.Option(
-      names = {"--graphql-tls-truststore-password-file"},
+      names = {TLS_TRUSTSTORE_PASSWORD_FILE},
       description = "Path to the file containing the password for the TLS truststore")
   private String graphqlTlsTruststorePasswordFile;
 
   @CommandLine.Option(
-      names = {"--graphql-max-blocks-range"},
+      names = {MAX_BLOCKS_RANGE},
       description =
           "Specifies the maximum number of blocks that can be retrieved by a single GraphQL "
               + "blocks(from,to) query. Must be >=0. 0 specifies no limit (default: ${DEFAULT-VALUE})")
@@ -111,26 +138,39 @@ public class GraphQlOptions {
    *
    * @param logger Logger instance
    * @param commandLine CommandLine instance
+   * @param nameInUse maps the name of an option to the name the user gave it
    * @throws CommandLine.ParameterException if the maximum block range is negative
    */
-  public void validate(final Logger logger, final CommandLine commandLine) {
+  public void validate(
+      final Logger logger, final CommandLine commandLine, final UnaryOperator<String> nameInUse) {
     if (isMaxBlockRangeInvalid()) {
-      throw new CommandLine.ParameterException(commandLine, MAX_BLOCKS_RANGE_ERROR);
+      throw new CommandLine.ParameterException(
+          commandLine, maxBlocksRangeError(nameInUse.apply(MAX_BLOCKS_RANGE)));
     }
-    checkOptionDependencies(logger, commandLine);
+    checkOptionDependencies(logger, commandLine, nameInUse);
   }
 
   /**
    * Validates the option values when the command line they belong to is not known: a negative
-   * maximum block range is rejected with the same message as {@link #validate(Logger,
-   * CommandLine)}. The option dependencies cannot be checked without the command line.
+   * maximum block range is rejected with the same message as {@link #validate(Logger, CommandLine,
+   * UnaryOperator)}. The option dependencies cannot be checked without the command line.
    *
    * @throws IllegalArgumentException if the maximum block range is negative
    */
   public void validateWithoutCommandLine() {
     if (isMaxBlockRangeInvalid()) {
-      throw new IllegalArgumentException(MAX_BLOCKS_RANGE_ERROR);
+      throw new IllegalArgumentException(maxBlocksRangeError(MAX_BLOCKS_RANGE));
     }
+  }
+
+  /**
+   * Returns the error for a negative maximum block range.
+   *
+   * @param optionName the name of the maximum block range option, as the user gave it
+   * @return the error message
+   */
+  static String maxBlocksRangeError(final String optionName) {
+    return optionName + " must be >= 0 (0 specifies no limit)";
   }
 
   private boolean isMaxBlockRangeInvalid() {
@@ -139,66 +179,107 @@ public class GraphQlOptions {
 
   /**
    * Logs a warning for the options that have no effect because the option they depend on is not
-   * set, with the same messages as Besu's own option checks.
+   * set, with the same messages as Besu's own option checks. The options are named by their {@code
+   * --plugin-graphql-*} names.
    *
    * @param logger Logger instance
    * @param commandLine CommandLine instance
    */
   public void checkOptionDependencies(final Logger logger, final CommandLine commandLine) {
-    checkOptionDependencies(
-        logger,
-        commandLine,
-        "--graphql-http-enabled",
-        !isGraphQLHttpEnabled,
-        asList(
-            "--graphql-http-cors-origins",
-            "--graphql-http-host",
-            "--graphql-http-port",
-            "--graphql-tls-enabled"));
-
-    checkOptionDependencies(
-        logger,
-        commandLine,
-        "--graphql-tls-enabled",
-        !graphqlTlsEnabled,
-        asList(
-            "--graphql-tls-keystore-file",
-            "--graphql-tls-keystore-password-file",
-            "--graphql-mtls-enabled"));
-
-    checkOptionDependencies(
-        logger,
-        commandLine,
-        "--graphql-mtls-enabled",
-        !graphqlMtlsEnabled,
-        asList("--graphql-tls-truststore-file", "--graphql-tls-truststore-password-file"));
+    checkOptionDependencies(logger, commandLine, UnaryOperator.identity());
   }
 
-  // Same as Besu's CommandLineUtils.checkOptionDependencies.
+  /**
+   * Logs a warning for the options that have no effect because the option they depend on is not
+   * set, with the same messages as Besu's own option checks.
+   *
+   * @param logger Logger instance
+   * @param commandLine CommandLine instance
+   * @param nameInUse maps the name of an option to the name the user gave it
+   */
+  public void checkOptionDependencies(
+      final Logger logger, final CommandLine commandLine, final UnaryOperator<String> nameInUse) {
+    checkOptionDependencies(
+        logger,
+        commandLine,
+        nameInUse,
+        HTTP_ENABLED,
+        !isGraphQLHttpEnabled,
+        asList(HTTP_CORS_ORIGINS, HTTP_HOST, HTTP_PORT, TLS_ENABLED));
+
+    checkOptionDependencies(
+        logger,
+        commandLine,
+        nameInUse,
+        TLS_ENABLED,
+        !graphqlTlsEnabled,
+        asList(TLS_KEYSTORE_FILE, TLS_KEYSTORE_PASSWORD_FILE, MTLS_ENABLED));
+
+    checkOptionDependencies(
+        logger,
+        commandLine,
+        nameInUse,
+        MTLS_ENABLED,
+        !graphqlMtlsEnabled,
+        asList(TLS_TRUSTSTORE_FILE, TLS_TRUSTSTORE_PASSWORD_FILE));
+  }
+
+  // Same as Besu's CommandLineUtils.checkOptionDependencies. The main option is named the way the
+  // affected options are: by its legacy name if the user gave any of them a legacy name.
   private static void checkOptionDependencies(
       final Logger logger,
       final CommandLine commandLine,
+      final UnaryOperator<String> nameInUse,
       final String mainOptionName,
       final boolean isMainOptionCondition,
       final List<String> dependentOptionsNames) {
     if (isMainOptionCondition) {
-      final String affectedOptions = getAffectedOptions(commandLine, dependentOptionsNames);
+      final List<String> affectedOptions =
+          getAffectedOptions(commandLine, dependentOptionsNames).stream().map(nameInUse).toList();
 
       if (!affectedOptions.isEmpty()) {
-        logger.warn(DEPENDENCY_WARNING_MSG, affectedOptions, mainOptionName);
+        final boolean legacyNamesUsed =
+            affectedOptions.stream().anyMatch(name -> name.startsWith(LEGACY_OPTION_PREFIX));
+        logger.warn(
+            DEPENDENCY_WARNING_MSG,
+            joiningWithLastDelimiter(affectedOptions),
+            legacyNamesUsed ? legacyName(mainOptionName) : mainOptionName);
       }
     }
   }
 
-  private static String getAffectedOptions(
+  /**
+   * Returns the deprecated legacy name of an option.
+   *
+   * @param optionName the {@code --plugin-graphql-*} name of the option
+   * @return the corresponding {@code --graphql-*} name
+   */
+  static String legacyName(final String optionName) {
+    return LEGACY_OPTION_PREFIX + optionName.substring(OPTION_PREFIX.length());
+  }
+
+  // The names (as declared, so the --plugin-graphql-* name) of the dependent options that are set.
+  private static List<String> getAffectedOptions(
       final CommandLine commandLine, final List<String> dependentOptionsNames) {
     return commandLine.getCommandSpec().options().stream()
         .filter(option -> Arrays.stream(option.names()).anyMatch(dependentOptionsNames::contains))
         .filter(GraphQlOptions::isOptionSet)
-        .map(option -> option.names()[0])
-        .collect(
-            Collectors.collectingAndThen(
-                Collectors.toList(), GraphQlOptions::joiningWithLastDelimiter));
+        .map(GraphQlOptions::canonicalName)
+        .collect(Collectors.toList());
+  }
+
+  /**
+   * Returns the {@code --plugin-graphql-*} name of an option, whichever names it was registered
+   * with.
+   *
+   * @param option the option
+   * @return the name of the option
+   */
+  static String canonicalName(final CommandLine.Model.OptionSpec option) {
+    return Arrays.stream(option.names())
+        .filter(name -> name.startsWith(OPTION_PREFIX))
+        .findFirst()
+        .orElse(option.names()[0]);
   }
 
   private static boolean isOptionSet(final CommandLine.Model.OptionSpec option) {

@@ -15,6 +15,7 @@
 package org.hyperledger.besu.plugins.graphql;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -54,8 +55,6 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import picocli.CommandLine;
-import picocli.CommandLine.Model.CommandSpec;
-import picocli.CommandLine.Model.OptionSpec;
 
 /**
  * Drives the GraphQL plugin only through its {@link BesuPlugin} lifecycle, the way Besu does: the
@@ -63,10 +62,17 @@ import picocli.CommandLine.Model.OptionSpec;
  * service implementations over the hive test chain and starts the plugin, which then serves every
  * spec fixture on the port it reports through its network endpoint. Each fixture runs on a Bonsai
  * and on a Forest world state, which the plugin tells apart from Besu's data storage configuration.
+ *
+ * <p>The fixtures are served by a plugin configured with the deprecated {@code --graphql-*} options
+ * of a Besu that bundles it, which must keep behaving exactly as Besu's former core GraphQL
+ * service. The lifecycle runs on both kinds of Besu, see {@link BesuHost}.
  */
 class GraphQLPluginEndToEndTest {
 
   private static final String[] ARGS = {"--graphql-http-enabled", "--graphql-http-port=0"};
+  private static final String[] PLUGIN_ARGS = {
+    "--plugin-graphql-http-enabled", "--plugin-graphql-http-port=0"
+  };
   private static final int MAX_LOG_FILTER_ADDRESSES = 2;
   private static final MediaType GRAPHQL = MediaType.parse("application/graphql; charset=utf-8");
 
@@ -90,6 +96,7 @@ class GraphQLPluginEndToEndTest {
    */
   static final class Node implements AutoCloseable {
     private final DataStorageFormat format;
+    private final BesuHost host;
     private final GraphQLPlugin plugin = new GraphQLPlugin();
     private final CommandLine commandLine = new CommandLine(new TestCommand());
     private final ServiceManager.SimpleServiceManager serviceManager =
@@ -97,23 +104,13 @@ class GraphQLPluginEndToEndTest {
     private final NetworkEndpointServiceImpl networkEndpointService =
         new NetworkEndpointServiceImpl();
 
-    Node(final DataStorageFormat format) {
+    Node(final DataStorageFormat format, final BesuHost host) {
       this.format = format;
+      this.host = host;
       // the services Besu offers to plugins when it registers them
-      serviceManager.addService(PicoCLIOptions.class, this::addPicoCLIOptions);
+      serviceManager.addService(PicoCLIOptions.class, host.picoCLIOptions(commandLine));
       serviceManager.addService(NetworkEndpointService.class, networkEndpointService);
       serviceManager.addService(RpcConfiguration.class, rpcConfiguration());
-    }
-
-    // Same as Besu's PicoCLIOptionsImpl with the --graphql- prefix allowed for the built-in plugin.
-    private void addPicoCLIOptions(final String namespace, final Object optionObject) {
-      final CommandSpec mixin = CommandSpec.forAnnotatedObject(optionObject);
-      for (final OptionSpec optionSpec : mixin.options()) {
-        for (final String name : optionSpec.names()) {
-          assertThat(name).startsWith("--graphql-");
-        }
-      }
-      commandLine.getCommandSpec().addMixin("Plugin " + namespace, mixin);
     }
 
     private static RpcConfiguration rpcConfiguration() {
@@ -138,6 +135,13 @@ class GraphQLPluginEndToEndTest {
 
     void register() {
       plugin.register(serviceManager);
+    }
+
+    /**
+     * The arguments that enable the service on an ephemeral port, as this kind of Besu names them.
+     */
+    String[] enablingArgs() {
+      return host == BesuHost.BUNDLED ? ARGS : PLUGIN_ARGS;
     }
 
     void parse(final String... args) {
@@ -180,7 +184,7 @@ class GraphQLPluginEndToEndTest {
     return STARTED_NODES.computeIfAbsent(
         format,
         f -> {
-          final Node node = new Node(f);
+          final Node node = new Node(f, BesuHost.BUNDLED);
           node.register();
           node.parse(ARGS);
           node.start();
@@ -214,14 +218,17 @@ class GraphQLPluginEndToEndTest {
     GraphQLSpecFixtures.assertFixture(CLIENT, startedNode(format).url(), fixture);
   }
 
-  @Test
-  void lifecycle() throws Exception {
-    try (Node node = new Node(DataStorageFormat.BONSAI)) {
+  @ParameterizedTest
+  @EnumSource(BesuHost.class)
+  void lifecycle(final BesuHost host) throws Exception {
+    try (Node node = new Node(DataStorageFormat.BONSAI, host)) {
       node.register();
+      assertThat(node.plugin.getCliOptions().isLegacyNamesRegistered())
+          .isEqualTo(host == BesuHost.BUNDLED);
       final NetworkEndpoint endpoint = node.graphQLEndpoint();
       assertThat(endpoint.getPortsFileKey()).isEqualTo("graphql-http");
 
-      node.parse(ARGS);
+      node.parse(node.enablingArgs());
       assertThat(endpoint.isEnabled()).isTrue();
       assertThat(endpoint.getHost()).isEqualTo("127.0.0.1");
       assertThat(endpoint.getConfiguredPort()).isZero();
@@ -242,9 +249,10 @@ class GraphQLPluginEndToEndTest {
     }
   }
 
-  @Test
-  void disabledByDefault() {
-    try (Node node = new Node(DataStorageFormat.BONSAI)) {
+  @ParameterizedTest
+  @EnumSource(BesuHost.class)
+  void disabledByDefault(final BesuHost host) {
+    try (Node node = new Node(DataStorageFormat.BONSAI, host)) {
       node.register();
       node.parse();
       node.start();
@@ -298,6 +306,38 @@ class GraphQLPluginEndToEndTest {
     assertThat(errors).hasSize(1);
     assertThat(errors.getJsonObject(0).getString("message"))
         .isEqualTo("Exception while fetching data (/logs) : Invalid params");
+  }
+
+  @ParameterizedTest
+  @EnumSource(
+      value = DataStorageFormat.class,
+      names = {"BONSAI", "FOREST"})
+  void servesQueriesWhenInstalledAsAnExternalPlugin(final DataStorageFormat format)
+      throws IOException {
+    try (Node node = new Node(format, BesuHost.EXTERNAL)) {
+      node.register();
+      assertThat(node.plugin.getCliOptions().isLegacyNamesRegistered()).isFalse();
+      node.parse(PLUGIN_ARGS);
+      node.start();
+
+      final JsonObject response =
+          query(node.url(), "{block(number: 32) {number} blocks(from: 1, to: 2) {number}}");
+      assertThat(response.containsKey("errors")).isFalse();
+      assertThat(response.getJsonObject("data").getJsonObject("block").getString("number"))
+          .isEqualTo("0x20");
+      assertThat(response.getJsonObject("data").getJsonArray("blocks")).hasSize(2);
+    }
+  }
+
+  @Test
+  void legacyOptionNamesAreRejectedWhenInstalledAsAnExternalPlugin() {
+    try (Node node = new Node(DataStorageFormat.BONSAI, BesuHost.EXTERNAL)) {
+      node.register();
+
+      assertThatThrownBy(() -> node.parse(ARGS))
+          .isInstanceOf(CommandLine.UnmatchedArgumentException.class)
+          .hasMessageContaining("--graphql-http-enabled");
+    }
   }
 
   private static JsonObject query(final String url, final String query) throws IOException {

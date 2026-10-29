@@ -26,18 +26,19 @@ import org.hyperledger.besu.plugin.ServiceManager;
 import org.hyperledger.besu.plugin.rpc.RpcConfiguration;
 import org.hyperledger.besu.plugin.services.PicoCLIOptions;
 
+import java.util.Arrays;
 import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import picocli.CommandLine;
-import picocli.CommandLine.Model.CommandSpec;
 
 /**
  * The GraphQL options keep the names, defaults and validation they had as Besu options. Mirrors
- * Besu's former {@code GraphQlOptionsTest}, with the options added to a command the way Besu adds
- * the options of its built-in plugins.
+ * Besu's former {@code GraphQlOptionsTest}, with the options added to the command of a Besu that
+ * bundles the plugin and so accepts their deprecated {@code --graphql-*} names. {@link
+ * GraphQLOptionNamesTest} covers the {@code --plugin-graphql-*} names and other kinds of Besu.
  */
 class GraphQlOptionsTest {
 
@@ -55,12 +56,7 @@ class GraphQlOptionsTest {
   @BeforeEach
   void setUp() {
     commandLine = new CommandLine(new TestCommand());
-    final PicoCLIOptions picoCLIOptions =
-        (namespace, optionObject) ->
-            commandLine
-                .getCommandSpec()
-                .addMixin("Plugin " + namespace, CommandSpec.forAnnotatedObject(optionObject));
-    serviceManager.addService(PicoCLIOptions.class, picoCLIOptions);
+    serviceManager.addService(PicoCLIOptions.class, BesuHost.BUNDLED.picoCLIOptions(commandLine));
     plugin.register(serviceManager);
   }
 
@@ -147,13 +143,12 @@ class GraphQlOptionsTest {
     // the config file and the environment provide values through the default value provider
     commandLine.setDefaultValueProvider(
         argSpec -> {
-          if (argSpec instanceof CommandLine.Model.OptionSpec option) {
-            return switch (option.longestName()) {
-              case "--graphql-http-enabled" -> "true";
-              case "--graphql-http-host" -> "6.7.8.9";
-              case "--graphql-http-port" -> "6789";
-              default -> null;
-            };
+          if (hasName(argSpec, "--graphql-http-enabled")) {
+            return "true";
+          } else if (hasName(argSpec, "--graphql-http-host")) {
+            return "6.7.8.9";
+          } else if (hasName(argSpec, "--graphql-http-port")) {
+            return "6789";
           }
           return null;
         });
@@ -232,11 +227,7 @@ class GraphQlOptionsTest {
   void graphQLMaxBlockRangeRejectsNegativeValueFromDefaultValueProvider() {
     // the config file and the environment provide values through the default value provider
     commandLine.setDefaultValueProvider(
-        argSpec ->
-            argSpec instanceof CommandLine.Model.OptionSpec option
-                    && "--graphql-max-blocks-range".equals(option.longestName())
-                ? "-1"
-                : null);
+        argSpec -> hasName(argSpec, "--graphql-max-blocks-range") ? "-1" : null);
     parseCommand("--graphql-http-enabled");
 
     assertThatThrownBy(plugin::validateOptions)
@@ -307,7 +298,10 @@ class GraphQlOptionsTest {
     parseCommand("--graphql-http-host", "1.2.3.4", "--graphql-http-port", "1234");
     final Logger logger = mock(Logger.class);
 
-    plugin.getCliOptions().getGraphQlOptions().checkOptionDependencies(logger, commandLine);
+    plugin
+        .getCliOptions()
+        .getGraphQlOptions()
+        .checkOptionDependencies(logger, commandLine, plugin.getCliOptions()::nameInUse);
 
     verify(logger)
         .warn(
@@ -326,7 +320,10 @@ class GraphQlOptionsTest {
         "/truststore");
     final Logger logger = mock(Logger.class);
 
-    plugin.getCliOptions().getGraphQlOptions().checkOptionDependencies(logger, commandLine);
+    plugin
+        .getCliOptions()
+        .getGraphQlOptions()
+        .checkOptionDependencies(logger, commandLine, plugin.getCliOptions()::nameInUse);
 
     verify(logger)
         .warn(
@@ -345,8 +342,17 @@ class GraphQlOptionsTest {
     parseCommand("--graphql-http-enabled", "--graphql-http-port", "1234");
     final Logger logger = mock(Logger.class);
 
-    plugin.getCliOptions().getGraphQlOptions().checkOptionDependencies(logger, commandLine);
+    plugin
+        .getCliOptions()
+        .getGraphQlOptions()
+        .checkOptionDependencies(logger, commandLine, plugin.getCliOptions()::nameInUse);
 
     verify(logger, never()).warn(anyString(), anyString(), anyString());
+  }
+
+  // Besu's default value providers look an option up by each of its names.
+  private static boolean hasName(final CommandLine.Model.ArgSpec argSpec, final String name) {
+    return argSpec instanceof CommandLine.Model.OptionSpec option
+        && Arrays.asList(option.names()).contains(name);
   }
 }

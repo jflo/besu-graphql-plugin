@@ -41,6 +41,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
+import com.google.auto.service.AutoService;
 import graphql.GraphQL;
 import io.vertx.core.Vertx;
 import io.vertx.core.VertxOptions;
@@ -49,12 +50,16 @@ import org.slf4j.LoggerFactory;
 import picocli.CommandLine;
 
 /**
- * The built-in GraphQL plugin. It serves Besu's GraphQL API over its own HTTP server, reading all
- * data through the plugin services, with the same command line options, endpoint and responses as
- * when the GraphQL service was part of Besu's core.
+ * The GraphQL plugin. It serves Besu's GraphQL API (EIP-1767) over its own HTTP server, reading all
+ * data through the plugin services, with the same endpoint and responses as when the GraphQL
+ * service was part of Besu's core.
  *
- * <p>Besu registers and starts this plugin itself, so it is not discoverable as a service.
+ * <p>Besu discovers the plugin with {@link java.util.ServiceLoader}, from its plugins directory or
+ * from its classpath. Its options are named {@code --plugin-graphql-*}; a Besu that bundles the
+ * plugin also accepts the deprecated {@code --graphql-*} names of the former core options, see
+ * {@link GraphQLCliOptions}.
  */
+@AutoService(BesuPlugin.class)
 public class GraphQLPlugin implements BesuPlugin {
 
   private static final Logger LOG = LoggerFactory.getLogger(GraphQLPlugin.class);
@@ -71,7 +76,7 @@ public class GraphQLPlugin implements BesuPlugin {
   private static final String SERVICE_NAME_FOR_ERRORS = "graphQLHttp";
   private static final String DEFAULT_HOST_ADDRESS = "127.0.0.1";
 
-  private final GraphQLCliOptions cliOptions = new GraphQLCliOptions();
+  private final GraphQLCliOptions cliOptions;
 
   private ServiceManager serviceManager;
   private boolean optionsValidated;
@@ -80,7 +85,18 @@ public class GraphQLPlugin implements BesuPlugin {
   private GraphQLHttpService graphQLHttpService;
 
   /** Creates the plugin. */
-  public GraphQLPlugin() {}
+  public GraphQLPlugin() {
+    this(new GraphQLCliOptions());
+  }
+
+  /**
+   * Creates the plugin with the given command line options.
+   *
+   * @param cliOptions the command line options
+   */
+  GraphQLPlugin(final GraphQLCliOptions cliOptions) {
+    this.cliOptions = cliOptions;
+  }
 
   @Override
   public void register(final ServiceManager serviceManager) {
@@ -88,7 +104,7 @@ public class GraphQLPlugin implements BesuPlugin {
     serviceManager
         .getService(PicoCLIOptions.class)
         .ifPresentOrElse(
-            picoCLIOptions -> picoCLIOptions.addPicoCLIOptions(NAME, cliOptions),
+            picoCLIOptions -> cliOptions.register(NAME, picoCLIOptions),
             () -> LOG.warn("No command line options service, the GraphQL options are unavailable"));
     serviceManager
         .getService(NetworkEndpointService.class)
@@ -97,11 +113,10 @@ public class GraphQLPlugin implements BesuPlugin {
 
   /**
    * Validates the GraphQL options once the command line is parsed: a negative maximum block range
-   * is rejected with the same error as before the GraphQL service became a plugin, and the options
-   * that have no effect are logged. Besu may call this while it validates its own options, so that
-   * the error is reported at the same point as before; otherwise it is called before the external
-   * services start, or at the latest when the plugin starts. Only the first successful call has an
-   * effect. The warnings about options that have no effect are logged with this plugin's logger.
+   * is rejected with the same error as before the GraphQL service became a plugin, the options that
+   * have no effect are logged, and so are the deprecated option names in use. It is called before
+   * the external services start, or at the latest when the plugin starts. Only the first successful
+   * call has an effect. The warnings are logged with this plugin's logger.
    *
    * @throws CommandLine.ParameterException if an option value is invalid
    * @throws IllegalArgumentException if an option value is invalid and the command line the options
@@ -113,8 +128,8 @@ public class GraphQLPlugin implements BesuPlugin {
 
   /**
    * Validates the GraphQL options as {@link #validateOptions()} does, logging the warnings about
-   * options that have no effect with the given logger. Besu passes its own logger, so these
-   * warnings are logged as they were before the GraphQL service became a plugin.
+   * options that have no effect with the given logger. Error messages and warnings name each option
+   * the way the user gave it, by its deprecated {@code --graphql-*} name if that is what was used.
    *
    * <p>If the command line the options belong to cannot be found, a negative maximum block range is
    * still rejected, with the same message, and the dependency warnings are skipped. The options
@@ -132,7 +147,8 @@ public class GraphQLPlugin implements BesuPlugin {
     final GraphQlOptions graphQlOptions = cliOptions.getGraphQlOptions();
     final CommandLine commandLine = cliOptions.getCommandLine();
     if (commandLine != null) {
-      graphQlOptions.validate(logger, commandLine);
+      graphQlOptions.validate(logger, commandLine, cliOptions::nameInUse);
+      cliOptions.logDeprecatedNames(LOG);
     } else {
       graphQlOptions.validateWithoutCommandLine();
     }
