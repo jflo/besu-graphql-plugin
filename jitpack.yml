@@ -1,0 +1,9 @@
+# JitPack (https://jitpack.io) builds com.github.jflo:besu-graphql-plugin:<tag> from a git tag the
+# first time someone requests it. This is the interim Maven repository while the plugin is not
+# published to Maven Central; the group changes when the repository is transferred (MAINTAINERS.md).
+# Gradle runs on JDK 21 here and provisions the JDK 25 toolchain itself (foojay resolver).
+# JitPack can only build versions whose Besu dependency is a Besu release (not a -SNAPSHOT).
+jdk:
+  - openjdk21
+install:
+  - ./gradlew publishToMavenLocal -x test -Pgroup="$GROUP" -Pversion="$VERSION"
