@@ -31,6 +31,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.TimeUnit;
 import java.util.zip.ZipEntry;
@@ -80,7 +81,7 @@ class BesuDistributionTest {
       Files.copy(genesis, genesisFile);
     }
     logFile = tempDir.resolve("besu.log");
-    // Same as the documented `unzip -j <zip> -d <besu>/plugins`.
+    // Same as the documented `unzip -j <zip> '*.jar' -d <besu>/plugins`.
     unzipFlat(Path.of(System.getProperty("plugin.distribution")), pluginsDir);
   }
 
@@ -164,6 +165,44 @@ class BesuDistributionTest {
   }
 
   @Test
+  void asBundledWithBesuOffersTheDeprecatedNames() throws Exception {
+    // Only a Besu that bundles plugins has a bundled-plugins directory. The distribution under
+    // test replaces the plugin bundled with it: Besu reads bundled-plugins/ under besu.home.
+    Assumptions.assumeTrue(
+        Files.isDirectory(besuHome.resolve(GraphQLCliOptions.BUNDLED_PLUGINS_DIRECTORY)),
+        "This Besu does not bundle plugins");
+    final Path home = Files.createDirectories(tempDir.resolve("besu-home"));
+    final Path bundledDir =
+        Files.createDirectories(home.resolve(GraphQLCliOptions.BUNDLED_PLUGINS_DIRECTORY));
+    unzipFlat(Path.of(System.getProperty("plugin.distribution")), bundledDir);
+    final Path emptyPluginsDir = Files.createDirectories(tempDir.resolve("no-plugins"));
+    final int configuredPort = freePort();
+
+    // the deprecated names on the command line and in the environment
+    final Properties ports =
+        startBesu(
+            Map.of("BESU_GRAPHQL_HTTP_PORT", String.valueOf(configuredPort)),
+            "-Dbesu.plugins.dir=" + emptyPluginsDir + " -Dbesu.home=" + home,
+            "--graphql-http-enabled");
+
+    assertThat(Integer.parseInt(ports.getProperty("graphql-http"))).isEqualTo(configuredPort);
+    final JsonObject response =
+        post(configuredPort, "/graphql", "application/json", "{\"query\":\"{block{number}}\"}");
+    assertThat(response.getJsonObject("data").getJsonObject("block").getString("number"))
+        .isEqualTo("0x0");
+    assertThat(Files.readString(logFile))
+        .contains(
+            "Option --graphql-http-enabled is deprecated and will be removed in a future release,"
+                + " use --plugin-graphql-http-enabled instead")
+        .contains(
+            "Environment variable BESU_GRAPHQL_HTTP_PORT is deprecated and will be removed in a"
+                + " future release, use BESU_PLUGIN_GRAPHQL_HTTP_PORT instead")
+        // Besu's own notice about the bundled plugin
+        .contains("GraphQL is served by the besu-graphql-plugin bundled with Besu")
+        .doesNotContain("did not have the expected prefix of --plugin-graphql-");
+  }
+
+  @Test
   void isDisabledByDefault() throws Exception {
     final Properties ports = startBesu();
 
@@ -176,6 +215,12 @@ class BesuDistributionTest {
   }
 
   private Properties startBesuWithOpts(final String javaOpts, final String... args)
+      throws Exception {
+    return startBesu(Map.of(), ("-Dbesu.plugins.dir=" + pluginsDir + " " + javaOpts).trim(), args);
+  }
+
+  private Properties startBesu(
+      final Map<String, String> environment, final String besuOpts, final String... args)
       throws Exception {
     final List<String> command = new ArrayList<>();
     command.add(besuHome.resolve("bin").resolve(isWindows() ? "besu.bat" : "besu").toString());
@@ -192,9 +237,8 @@ class BesuDistributionTest {
     command.addAll(List.of(args));
     final ProcessBuilder builder =
         new ProcessBuilder(command).redirectErrorStream(true).redirectOutput(logFile.toFile());
-    builder
-        .environment()
-        .put("BESU_OPTS", ("-Dbesu.plugins.dir=" + pluginsDir + " " + javaOpts).trim());
+    builder.environment().putAll(environment);
+    builder.environment().put("BESU_OPTS", besuOpts);
     besu = builder.start();
 
     final Path portsFile = dataDir.resolve("besu.ports");
@@ -242,7 +286,7 @@ class BesuDistributionTest {
     try (ZipInputStream in = new ZipInputStream(Files.newInputStream(zip))) {
       ZipEntry entry;
       while ((entry = in.getNextEntry()) != null) {
-        if (!entry.isDirectory()) {
+        if (!entry.isDirectory() && entry.getName().endsWith(".jar")) {
           final Path name = Path.of(entry.getName()).getFileName();
           Files.copy(in, target.resolve(name.toString()));
         }
