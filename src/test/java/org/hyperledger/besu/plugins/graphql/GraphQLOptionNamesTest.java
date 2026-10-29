@@ -259,8 +259,8 @@ class GraphQLOptionNamesTest {
     plugin.getCliOptions().logDeprecatedNames(logger);
     verify(logger)
         .warn(
-            "Environment variable {} is ignored, as this Besu does not accept the deprecated {}*"
-                + " option names: use {} instead",
+            "Environment variable {} is ignored, as the deprecated {}* option names are only"
+                + " available when the GraphQL plugin is bundled with Besu: use {} instead",
             envVar(option.legacyName()),
             "--graphql-",
             envVar(option.name()));
@@ -359,8 +359,51 @@ class GraphQLOptionNamesTest {
   }
 
   @Test
+  void anExternalInstallDoesNotOfferTheLegacyNames() {
+    final List<String> offeredNames = new ArrayList<>();
+    final PicoCLIOptions bundling = BesuHost.BUNDLED.picoCLIOptions(commandLine);
+    // even to a Besu that would accept them
+    register(
+        (namespace, optionObject) -> {
+          CommandSpec.forAnnotatedObject(optionObject).options().stream()
+              .flatMap(o -> Arrays.stream(o.names()))
+              .forEach(offeredNames::add);
+          bundling.addPicoCLIOptions(namespace, optionObject);
+        },
+        null,
+        false);
+
+    assertThat(plugin.getCliOptions().isLegacyNamesRegistered()).isFalse();
+    assertThat(offeredNames)
+        .containsExactlyInAnyOrderElementsOf(allOptionNames(GraphQlOptions.OPTION_PREFIX));
+  }
+
+  @Test
+  void theSystemPropertyOffersTheLegacyNamesToAnExternalInstall() {
+    register(BesuHost.BUNDLED.picoCLIOptions(commandLine), "true", false);
+
+    assertThat(plugin.getCliOptions().isLegacyNamesRegistered()).isTrue();
+  }
+
+  @Test
+  void theBundledPluginsDirectoryIsRecognised() {
+    assertThat(
+            GraphQLCliOptions.isInBundledPluginsDirectory(
+                Path.of("/opt/besu/bundled-plugins/besu-graphql-plugin-1.0.0.jar")))
+        .isTrue();
+    assertThat(
+            GraphQLCliOptions.isInBundledPluginsDirectory(
+                Path.of("/opt/besu/plugins/besu-graphql-plugin-1.0.0.jar")))
+        .isFalse();
+    assertThat(GraphQLCliOptions.isInBundledPluginsDirectory(Path.of("/"))).isFalse();
+    // the tests run the plugin from its build directory, as an external plugin would be
+    assertThat(GraphQLCliOptions.isInBundledPluginsDirectory(GraphQLCliOptions.class)).isFalse();
+  }
+
+  @Test
   void aRejectedAttemptLeavesOnlyThePluginOptions() {
-    register(BesuHost.EXTERNAL);
+    // the system property makes the plugin offer the legacy names to a Besu that rejects them
+    register(BesuHost.EXTERNAL.picoCLIOptions(commandLine), "true", false);
 
     assertThat(plugin.getCliOptions().isLegacyNamesRegistered()).isFalse();
     assertThat(graphQLOptionNames())
@@ -395,7 +438,8 @@ class GraphQLOptionNamesTest {
               .forEach(offeredNames::add);
           bundled.addPicoCLIOptions(namespace, optionObject);
         },
-        "false");
+        "false",
+        true);
 
     assertThat(plugin.getCliOptions().isLegacyNamesRegistered()).isFalse();
     assertThat(offeredNames)
@@ -457,11 +501,16 @@ class GraphQLOptionNamesTest {
   }
 
   private void register(final BesuHost host) {
-    register(host.picoCLIOptions(commandLine), null);
+    register(host.picoCLIOptions(commandLine), null, host.bundlesThePlugin());
   }
 
-  private void register(final PicoCLIOptions picoCLIOptions, final String legacyNamesProperty) {
-    plugin = new GraphQLPlugin(new GraphQLCliOptions(() -> environment, () -> legacyNamesProperty));
+  private void register(
+      final PicoCLIOptions picoCLIOptions,
+      final String legacyNamesProperty,
+      final boolean bundled) {
+    plugin =
+        new GraphQLPlugin(
+            new GraphQLCliOptions(() -> environment, () -> legacyNamesProperty, () -> bundled));
     final ServiceManager.SimpleServiceManager serviceManager =
         new ServiceManager.SimpleServiceManager();
     serviceManager.addService(PicoCLIOptions.class, picoCLIOptions);

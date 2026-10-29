@@ -97,7 +97,7 @@ class GraphQLPluginEndToEndTest {
   static final class Node implements AutoCloseable {
     private final DataStorageFormat format;
     private final BesuHost host;
-    private final GraphQLPlugin plugin = new GraphQLPlugin();
+    private final GraphQLPlugin plugin;
     private final CommandLine commandLine = new CommandLine(new TestCommand());
     private final ServiceManager.SimpleServiceManager serviceManager =
         new ServiceManager.SimpleServiceManager();
@@ -107,6 +107,7 @@ class GraphQLPluginEndToEndTest {
     Node(final DataStorageFormat format, final BesuHost host) {
       this.format = format;
       this.host = host;
+      this.plugin = host.newPlugin();
       // the services Besu offers to plugins when it registers them
       serviceManager.addService(PicoCLIOptions.class, host.picoCLIOptions(commandLine));
       serviceManager.addService(NetworkEndpointService.class, networkEndpointService);

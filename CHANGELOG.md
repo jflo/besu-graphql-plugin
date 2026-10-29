@@ -27,5 +27,6 @@ release that contains besu-eth/besu#11744.
 ### Deprecated
 - When Besu bundles the plugin, the former option names `--graphql-*` (TOML keys `graphql-*`,
   environment variables `BESU_GRAPHQL_*`) remain accepted as aliases of the `--plugin-graphql-*`
-  options and log a deprecation warning. They, and the bundling of the plugin in Besu's
-  distribution, will be removed in a future release.
+  options and log a deprecation warning. The plugin offers them only when Besu loads it from its
+  `bundled-plugins` directory (or `-Dbesu.plugin.graphql.legacy-option-names=true` is set). They,
+  and the bundling of the plugin in Besu's distribution, will be removed in a future release.

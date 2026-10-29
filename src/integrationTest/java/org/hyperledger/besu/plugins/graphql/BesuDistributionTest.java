@@ -140,16 +140,27 @@ class BesuDistributionTest {
   }
 
   @Test
-  void theLegacyNameCheckCanBeSkipped() throws Exception {
+  void anExternalInstallDoesNotOfferTheLegacyNames() throws Exception {
+    final Properties ports =
+        startBesu("--plugin-graphql-http-enabled", "--plugin-graphql-http-port=0");
+
+    assertThat(ports.getProperty("graphql-http")).isNotNull();
+    // installed in the plugins directory, not bundled: no attempt at the --graphql-* names
+    assertThat(Files.readString(logFile))
+        .doesNotContain("did not have the expected prefix of --plugin-graphql-")
+        .doesNotContain("does not accept the deprecated");
+  }
+
+  @Test
+  void theLegacyNamesCanBeOfferedWithTheSystemProperty() throws Exception {
+    // whether this Besu accepts them or not, the plugin starts with its own names
     final Properties ports =
         startBesuWithOpts(
-            "-Dbesu.plugin.graphql.legacy-option-names=false",
+            "-Dbesu.plugin.graphql.legacy-option-names=true",
             "--plugin-graphql-http-enabled",
             "--plugin-graphql-http-port=0");
 
     assertThat(ports.getProperty("graphql-http")).isNotNull();
-    assertThat(Files.readString(logFile))
-        .doesNotContain("did not have the expected prefix of --plugin-graphql-");
   }
 
   @Test

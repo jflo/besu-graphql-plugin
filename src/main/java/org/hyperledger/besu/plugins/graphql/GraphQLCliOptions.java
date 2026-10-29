@@ -21,11 +21,15 @@ import static org.hyperledger.besu.plugins.graphql.GraphQlOptions.legacyName;
 
 import org.hyperledger.besu.plugin.services.PicoCLIOptions;
 
+import java.net.URISyntaxException;
+import java.nio.file.Path;
+import java.security.CodeSource;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 
 import org.slf4j.Logger;
@@ -50,21 +54,33 @@ import picocli.CommandLine.ParseResult;
  * and {@code BESU_GRAPHQL_*} environment variables keep working. The legacy names are deprecated:
  * using one logs a warning that names its replacement.
  *
- * <p>The plugin API has no way to ask Besu which option names it accepts, so {@link
- * #register(String, PicoCLIOptions)} first offers the options with both names; if Besu rejects
- * them, it registers them with the {@code --plugin-graphql-*} names only. Besu checks every name
- * before it adds any option, so a rejected attempt leaves nothing behind. Besu logs an error for
- * each name it rejects; starting Besu with {@code -Dbesu.plugin.graphql.legacy-option-names=false}
- * skips the attempt.
+ * <p>The legacy names come with the bundling: the plugin offers them only when Besu loaded it from
+ * the directory of the plugins bundled with its distribution ({@value #BUNDLED_PLUGINS_DIRECTORY}).
+ * Installed as an external plugin, it only has its {@code --plugin-graphql-*} names. The {@value
+ * #LEGACY_OPTION_NAMES_PROPERTY} system property overrides this: {@code true} offers the legacy
+ * names wherever the plugin is installed, {@code false} never offers them.
+ *
+ * <p>The plugin API has no way to ask Besu which option names it accepts, so when it offers them,
+ * {@link #register(String, PicoCLIOptions)} first offers the options with both names; if Besu
+ * rejects them, it registers them with the {@code --plugin-graphql-*} names only. Besu checks every
+ * name before it adds any option, so a rejected attempt leaves nothing behind (Besu logs an error
+ * for each name it rejects).
  */
 public class GraphQLCliOptions {
 
   /**
    * The system property that, set to {@code false}, keeps the plugin from offering the deprecated
-   * {@code --graphql-*} names to Besu.
+   * {@code --graphql-*} names to Besu, and set to {@code true}, makes it offer them even when it is
+   * not bundled with Besu. When it is not set, the plugin offers them only when it is bundled.
    */
   public static final String LEGACY_OPTION_NAMES_PROPERTY =
       "besu.plugin.graphql.legacy-option-names";
+
+  /**
+   * The directory, under its home directory, that a Besu bundling this plugin loads it from. The
+   * plugin offers its deprecated {@code --graphql-*} names only when it is loaded from there.
+   */
+  public static final String BUNDLED_PLUGINS_DIRECTORY = "bundled-plugins";
 
   private static final Logger LOG = LoggerFactory.getLogger(GraphQLCliOptions.class);
 
@@ -76,6 +92,7 @@ public class GraphQLCliOptions {
 
   private final Supplier<Map<String, String>> environment;
   private final Supplier<String> legacyOptionNamesProperty;
+  private final BooleanSupplier bundled;
 
   // The spec of the options as they were added to Besu's command.
   private CommandSpec registeredSpec;
@@ -83,22 +100,69 @@ public class GraphQLCliOptions {
 
   /** Default constructor */
   public GraphQLCliOptions() {
-    this(System::getenv, () -> System.getProperty(LEGACY_OPTION_NAMES_PROPERTY));
+    this(
+        System::getenv,
+        () -> System.getProperty(LEGACY_OPTION_NAMES_PROPERTY),
+        () -> isInBundledPluginsDirectory(GraphQLCliOptions.class));
   }
 
   /**
-   * Creates the options with the given sources for the environment and the {@value
-   * #LEGACY_OPTION_NAMES_PROPERTY} property.
+   * Creates the options with the given sources for the environment, the {@value
+   * #LEGACY_OPTION_NAMES_PROPERTY} property and whether the plugin is bundled with Besu.
    *
    * @param environment the environment variables Besu reads options from
    * @param legacyOptionNamesProperty the value of the {@value #LEGACY_OPTION_NAMES_PROPERTY}
    *     property, null if it is not set
+   * @param bundled whether Besu loaded the plugin from the plugins bundled with its distribution
    */
   GraphQLCliOptions(
       final Supplier<Map<String, String>> environment,
-      final Supplier<String> legacyOptionNamesProperty) {
+      final Supplier<String> legacyOptionNamesProperty,
+      final BooleanSupplier bundled) {
     this.environment = environment;
     this.legacyOptionNamesProperty = legacyOptionNamesProperty;
+    this.bundled = bundled;
+  }
+
+  /**
+   * Whether the given class was loaded from a jar in a directory named {@value
+   * #BUNDLED_PLUGINS_DIRECTORY}, the directory of the plugins bundled with Besu's distribution.
+   *
+   * @param type the class
+   * @return true if the class comes from the bundled plugins directory
+   */
+  static boolean isInBundledPluginsDirectory(final Class<?> type) {
+    try {
+      final CodeSource codeSource = type.getProtectionDomain().getCodeSource();
+      if (codeSource == null || codeSource.getLocation() == null) {
+        return false;
+      }
+      return isInBundledPluginsDirectory(Path.of(codeSource.getLocation().toURI()));
+    } catch (final URISyntaxException | RuntimeException e) {
+      LOG.debug("Cannot tell where the GraphQL plugin was loaded from", e);
+      return false;
+    }
+  }
+
+  /**
+   * Whether the given jar is in a directory named {@value #BUNDLED_PLUGINS_DIRECTORY}.
+   *
+   * @param jar the path of the jar
+   * @return true if the jar is in the bundled plugins directory
+   */
+  static boolean isInBundledPluginsDirectory(final Path jar) {
+    final Path directory = jar.toAbsolutePath().getParent();
+    return directory != null
+        && directory.getFileName() != null
+        && BUNDLED_PLUGINS_DIRECTORY.equals(directory.getFileName().toString());
+  }
+
+  private boolean offersLegacyNames() {
+    final String property = legacyOptionNamesProperty.get();
+    if ("false".equalsIgnoreCase(property)) {
+      return false;
+    }
+    return "true".equalsIgnoreCase(property) || bundled.getAsBoolean();
   }
 
   /**
@@ -113,7 +177,8 @@ public class GraphQLCliOptions {
 
   /**
    * Adds the options to Besu's command, with their deprecated {@code --graphql-*} names as well if
-   * Besu accepts them.
+   * the plugin is bundled with Besu (or the {@value #LEGACY_OPTION_NAMES_PROPERTY} property asks
+   * for them) and Besu accepts them.
    *
    * @param namespace the namespace of the plugin's options
    * @param picoCLIOptions Besu's command line options service
@@ -128,7 +193,7 @@ public class GraphQLCliOptions {
     if (registeredSpec != null) {
       throw new IllegalStateException("The GraphQL options are already registered");
     }
-    if (!"false".equalsIgnoreCase(legacyOptionNamesProperty.get())) {
+    if (offersLegacyNames()) {
       final CommandSpec withLegacyNames = withLegacyNames(CommandSpec.forAnnotatedObject(this));
       try {
         picoCLIOptions.addPicoCLIOptions(namespace, withLegacyNames);
@@ -211,9 +276,10 @@ public class GraphQLCliOptions {
 
   /**
    * Logs a warning for each deprecated name the user gave an option, naming its replacement. When
-   * Besu does not accept the deprecated names, logs a warning for each {@code BESU_GRAPHQL_*}
-   * environment variable that is ignored because of that (Besu itself rejects the deprecated names
-   * on the command line and in the configuration file).
+   * the options do not have their deprecated names (the plugin is not bundled with Besu, or Besu
+   * does not accept them), logs a warning for each {@code BESU_GRAPHQL_*} environment variable that
+   * is ignored because of that (Besu itself rejects the deprecated names on the command line and in
+   * the configuration file).
    *
    * @param logger the logger for the warnings
    */
@@ -240,8 +306,8 @@ public class GraphQLCliOptions {
         if (environment.get().containsKey(legacyEnvVar)
             && commandLine.getCommandSpec().findOption(legacyName) == null) {
           logger.warn(
-              "Environment variable {} is ignored, as this Besu does not accept the deprecated {}*"
-                  + " option names: use {} instead",
+              "Environment variable {} is ignored, as the deprecated {}* option names are only"
+                  + " available when the GraphQL plugin is bundled with Besu: use {} instead",
               legacyEnvVar,
               LEGACY_OPTION_PREFIX,
               envVarName(canonicalName(option)));

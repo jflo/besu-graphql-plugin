@@ -107,14 +107,19 @@ If both names are given, the command line wins over the environment, which wins 
 configuration file, as usual; within the configuration file or the environment the
 `--plugin-graphql-*` name wins.
 
-A Besu that does not bundle the plugin only accepts the `--plugin-graphql-*` names: the
-deprecated names are unknown options on its command line and in its configuration file, and
-`BESU_GRAPHQL_*` environment variables are ignored (the plugin logs a warning for each). The
-plugin cannot ask Besu which names it accepts, so it offers both and falls back to the
-`--plugin-graphql-*` names when Besu refuses; Besu logs an error for each refused name
-(`Plugin option --graphql-http-enabled did not have the expected prefix of --plugin-graphql-`),
-followed by an INFO line from the plugin saying they can be ignored. Start Besu with
-`BESU_OPTS=-Dbesu.plugin.graphql.legacy-option-names=false` to skip the attempt.
+The deprecated names come with the bundling: the plugin offers them to Besu only when Besu loads
+it from the `bundled-plugins` directory of its distribution. Installed in Besu's `plugins`
+directory, which also replaces a bundled copy, the plugin only has the `--plugin-graphql-*`
+names: the deprecated names are unknown options on the command line and in the configuration
+file, and `BESU_GRAPHQL_*` environment variables are ignored (the plugin logs a warning for each).
+
+The system property `besu.plugin.graphql.legacy-option-names` overrides this: start Besu with
+`BESU_OPTS=-Dbesu.plugin.graphql.legacy-option-names=true` to have an installed plugin offer the
+deprecated names too, or `=false` to keep a bundled one from offering them. The plugin cannot ask
+Besu which names it accepts, so if Besu refuses them, the plugin falls back to the
+`--plugin-graphql-*` names; Besu then logs an error for each refused name (`Plugin option
+--graphql-http-enabled did not have the expected prefix of --plugin-graphql-`), followed by an
+INFO line from the plugin saying they can be ignored.
 
 ## Relationship to Besu and deprecation plan
 

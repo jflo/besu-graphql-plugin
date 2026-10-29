@@ -47,6 +47,28 @@ enum BesuHost {
   };
 
   /**
+   * Whether this kind of Besu bundles the plugin, i.e. loads it from its bundled plugins directory.
+   *
+   * @return true for a Besu that bundles the plugin
+   */
+  boolean bundlesThePlugin() {
+    return this == BUNDLED;
+  }
+
+  /**
+   * Creates the plugin as this kind of Besu loads it: bundled or as an external plugin.
+   *
+   * @return the plugin
+   */
+  GraphQLPlugin newPlugin() {
+    return new GraphQLPlugin(
+        new GraphQLCliOptions(
+            System::getenv,
+            () -> System.getProperty(GraphQLCliOptions.LEGACY_OPTION_NAMES_PROPERTY),
+            this::bundlesThePlugin));
+  }
+
+  /**
    * Returns the command line service this kind of Besu hands the plugin.
    *
    * @param commandLine Besu's command line

@@ -48,7 +48,7 @@ class GraphQlOptionsTest {
     public void run() {}
   }
 
-  private final GraphQLPlugin plugin = new GraphQLPlugin();
+  private final GraphQLPlugin plugin = BesuHost.BUNDLED.newPlugin();
   private final ServiceManager.SimpleServiceManager serviceManager =
       new ServiceManager.SimpleServiceManager();
   private CommandLine commandLine;

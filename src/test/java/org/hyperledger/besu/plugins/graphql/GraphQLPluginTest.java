@@ -84,7 +84,8 @@ class GraphQLPluginTest {
 
   @TempDir private Path dataDir;
 
-  private final GraphQLPlugin plugin = new GraphQLPlugin();
+  // a Besu that accepts every option name, so bundles the plugin
+  private final GraphQLPlugin plugin = BesuHost.BUNDLED.newPlugin();
   private final ServiceManager.SimpleServiceManager serviceManager =
       new ServiceManager.SimpleServiceManager();
   private final TestNetworkEndpointService networkEndpointService =
