@@ -82,6 +82,13 @@ public class GraphQLCliOptions {
    */
   public static final String BUNDLED_PLUGINS_DIRECTORY = "bundled-plugins";
 
+  /**
+   * Added to the heading of the GraphQL section of the help when the options also have their
+   * deprecated names.
+   */
+  static final String LEGACY_NAMES_HEADING_NOTE =
+      " (--graphql-* names are deprecated, use --plugin-graphql-*)";
+
   private static final Logger LOG = LoggerFactory.getLogger(GraphQLCliOptions.class);
 
   private static final String ENV_VAR_PREFIX = "BESU_";
@@ -275,27 +282,55 @@ public class GraphQLCliOptions {
   }
 
   /**
-   * Logs a warning for each deprecated name the user gave an option, naming its replacement. When
-   * the options do not have their deprecated names (the plugin is not bundled with Besu, or Besu
-   * does not accept them), logs a warning for each {@code BESU_GRAPHQL_*} environment variable that
-   * is ignored because of that (Besu itself rejects the deprecated names on the command line and in
-   * the configuration file).
+   * Logs the warnings about deprecated names of {@link #logDeprecatedNames(Logger, boolean)} as for
+   * an enabled GraphQL service.
    *
    * @param logger the logger for the warnings
    */
-  public synchronized void logDeprecatedNames(final Logger logger) {
+  public void logDeprecatedNames(final Logger logger) {
+    logDeprecatedNames(logger, true);
+  }
+
+  /**
+   * Logs a warning for each deprecated name the user gave an option, naming its replacement, and
+   * for each deprecated name whose value is ignored because the option is also given, with a
+   * different value, under its {@code --plugin-graphql-*} name in the same place (the configuration
+   * file or the environment). These are only logged when the GraphQL service is enabled: otherwise
+   * the options have no effect, and Besu's Docker image sets {@code BESU_GRAPHQL_HTTP_HOST} for
+   * every container.
+   *
+   * <p>When the options do not have their deprecated names (the plugin is not bundled with Besu, or
+   * Besu does not accept them), logs a warning for each {@code BESU_GRAPHQL_*} environment variable
+   * that is ignored because of that, whether the service is enabled or not (Besu itself rejects the
+   * deprecated names on the command line and in the configuration file).
+   *
+   * @param logger the logger for the warnings
+   * @param serviceEnabled whether the GraphQL service is enabled
+   */
+  public synchronized void logDeprecatedNames(final Logger logger, final boolean serviceEnabled) {
     final CommandLine commandLine = getCommandLine();
     if (commandLine == null) {
       return;
     }
     for (final OptionSpec option : registeredSpec.options()) {
       if (legacyNamesRegistered) {
+        if (!serviceEnabled) {
+          continue;
+        }
         legacyUse(option, commandLine)
             .ifPresent(
                 use ->
                     logger.warn(
                         "{} {} is deprecated and will be removed in a future release, use {}"
                             + " instead",
+                        use.kind(),
+                        use.legacyName(),
+                        use.replacement()));
+        ignoredLegacyValue(option, commandLine)
+            .ifPresent(
+                use ->
+                    logger.warn(
+                        "{} {} is deprecated and ignored, because {} is also set",
                         use.kind(),
                         use.legacyName(),
                         use.replacement()));
@@ -332,19 +367,66 @@ public class GraphQLCliOptions {
       }
     }
     // The configuration file and the environment are read by Besu's default value provider, which
-    // looks the option up by each of its names in turn.
+    // looks the option up by each of its names in turn, in the environment first.
     final IDefaultValueProvider provider = commandLine.getDefaultValueProvider();
-    if (provider == null
-        || valueUnderName(provider, option, name) != null
+    if (provider == null) {
+      return Optional.empty();
+    }
+    final Map<String, String> env = environment.get();
+    final String legacyEnvVar = envVarName(legacyName);
+    if (env.containsKey(legacyEnvVar)
+        && !env.containsKey(envVarName(name))
+        && valueUnderName(provider, option, legacyName) != null) {
+      // the environment wins over the configuration file, whatever the names
+      return Optional.of(new LegacyUse("Environment variable", legacyEnvVar, envVarName(name)));
+    }
+    if (valueUnderName(provider, option, name) != null
         || valueUnderName(provider, option, legacyName) == null) {
       return Optional.empty();
     }
-    final String legacyEnvVar = envVarName(legacyName);
-    if (environment.get().containsKey(legacyEnvVar)) {
-      return Optional.of(new LegacyUse("Environment variable", legacyEnvVar, envVarName(name)));
-    }
     return Optional.of(
         new LegacyUse("Configuration file key", legacyName.substring(2), name.substring(2)));
+  }
+
+  /**
+   * Returns the deprecated name of an option whose value is ignored because the option is also
+   * given, with another value, under its {@code --plugin-graphql-*} name in the same place: both
+   * environment variables, or both configuration file keys. That the command line wins over the
+   * environment, which wins over the configuration file, is not reported, as it is the same for
+   * every option.
+   */
+  private Optional<LegacyUse> ignoredLegacyValue(
+      final OptionSpec option, final CommandLine commandLine) {
+    final String name = canonicalName(option);
+    final String legacyName = legacyName(name);
+    final ParseResult parseResult = commandLine.getParseResult();
+    if (parseResult != null
+        && (isOnCommandLine(parseResult.originalArgs(), name)
+            || isOnCommandLine(parseResult.originalArgs(), legacyName))) {
+      return Optional.empty();
+    }
+    final Map<String, String> env = environment.get();
+    final String envVar = envVarName(name);
+    final String legacyEnvVar = envVarName(legacyName);
+    if (env.containsKey(envVar) || env.containsKey(legacyEnvVar)) {
+      if (env.containsKey(envVar)
+          && env.containsKey(legacyEnvVar)
+          && !Objects.equals(env.get(envVar), env.get(legacyEnvVar))) {
+        return Optional.of(new LegacyUse("Environment variable", legacyEnvVar, envVar));
+      }
+      return Optional.empty();
+    }
+    final IDefaultValueProvider provider = commandLine.getDefaultValueProvider();
+    if (provider == null) {
+      return Optional.empty();
+    }
+    final String value = valueUnderName(provider, option, name);
+    final String legacyValue = valueUnderName(provider, option, legacyName);
+    if (value != null && legacyValue != null && !value.equals(legacyValue)) {
+      return Optional.of(
+          new LegacyUse("Configuration file key", legacyName.substring(2), name.substring(2)));
+    }
+    return Optional.empty();
   }
 
   private static boolean isOnCommandLine(final List<String> args, final String optionName) {
@@ -396,7 +478,7 @@ public class GraphQLCliOptions {
   private static ArgGroupSpec withLegacyNames(final ArgGroupSpec group) {
     final ArgGroupSpec.Builder builder =
         ArgGroupSpec.builder()
-            .heading(group.heading())
+            .heading(withDeprecationNote(group.heading()))
             .headingKey(group.headingKey())
             .exclusive(group.exclusive())
             .multiplicity(group.multiplicity())
@@ -413,6 +495,22 @@ public class GraphQLCliOptions {
       builder.addSubgroup(withLegacyNames(subgroup));
     }
     return builder.build();
+  }
+
+  /**
+   * Adds {@value #LEGACY_NAMES_HEADING_NOTE} to a section heading of the help, before its line
+   * break.
+   */
+  private static String withDeprecationNote(final String heading) {
+    if (heading == null) {
+      return null;
+    }
+    final String lineBreak = "%n";
+    return heading.endsWith(lineBreak)
+        ? heading.substring(0, heading.length() - lineBreak.length())
+            + LEGACY_NAMES_HEADING_NOTE
+            + lineBreak
+        : heading + LEGACY_NAMES_HEADING_NOTE;
   }
 
   private static OptionSpec withLegacyName(final OptionSpec option) {

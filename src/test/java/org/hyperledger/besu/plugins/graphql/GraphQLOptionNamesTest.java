@@ -18,6 +18,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -63,6 +64,9 @@ class GraphQLOptionNamesTest {
 
   private static final String DEPRECATION_WARNING =
       "{} {} is deprecated and will be removed in a future release, use {} instead";
+
+  private static final String IGNORED_WARNING =
+      "{} {} is deprecated and ignored, because {} is also set";
 
   @CommandLine.Command(name = "besu")
   static class TestCommand implements Runnable {
@@ -278,7 +282,115 @@ class GraphQLOptionNamesTest {
     assertThat(plugin.getConfiguration().getPort()).isEqualTo(1111);
     assertThat(plugin.getConfiguration().getHost()).isEqualTo("1.1.1.1");
     plugin.getCliOptions().logDeprecatedNames(logger);
+    // the ignored legacy values are reported, not as values in use
+    verify(logger)
+        .warn(
+            IGNORED_WARNING,
+            "Environment variable",
+            "BESU_GRAPHQL_HTTP_PORT",
+            "BESU_PLUGIN_GRAPHQL_HTTP_PORT");
+    verify(logger)
+        .warn(
+            IGNORED_WARNING,
+            "Configuration file key",
+            "graphql-http-host",
+            "plugin-graphql-http-host");
+    verify(logger, never()).warn(eq(DEPRECATION_WARNING), any(Object[].class));
+  }
+
+  @Test
+  void aLegacyValueEqualToThePluginValueIsNotReportedAsIgnored() throws IOException {
+    register(BesuHost.BUNDLED);
+    environment.put("BESU_PLUGIN_GRAPHQL_HTTP_HOST", "0.0.0.0");
+    environment.put("BESU_GRAPHQL_HTTP_HOST", "0.0.0.0");
+    writeConfig("graphql-http-port=1111\nplugin-graphql-http-port=1111\n");
+
+    parse();
+
+    plugin.getCliOptions().logDeprecatedNames(logger);
     verify(logger, never()).warn(anyString(), any(Object[].class));
+  }
+
+  @Test
+  void aLegacyEnvironmentVariableWinsOverThePluginNameInTheConfigFile() throws IOException {
+    // the environment wins over the configuration file, whatever the names
+    register(BesuHost.BUNDLED);
+    environment.put("BESU_GRAPHQL_HTTP_HOST", "2.2.2.2");
+    writeConfig("plugin-graphql-http-host=\"1.1.1.1\"\n");
+
+    parse();
+
+    assertThat(plugin.getConfiguration().getHost()).isEqualTo("2.2.2.2");
+    assertThat(plugin.getCliOptions().nameInUse("--plugin-graphql-http-host"))
+        .isEqualTo("--graphql-http-host");
+    plugin.getCliOptions().logDeprecatedNames(logger);
+    verify(logger)
+        .warn(
+            DEPRECATION_WARNING,
+            "Environment variable",
+            "BESU_GRAPHQL_HTTP_HOST",
+            "BESU_PLUGIN_GRAPHQL_HTTP_HOST");
+    verify(logger, never()).warn(eq(IGNORED_WARNING), any(Object[].class));
+  }
+
+  @Test
+  void thePluginEnvironmentVariableOverridesTheLegacyOneOfTheDockerImage() throws IOException {
+    // Besu's Docker image sets BESU_GRAPHQL_HTTP_HOST=0.0.0.0. A container that sets
+    // BESU_GRAPHQL_HTTP_HOST replaces that value; one that sets BESU_PLUGIN_GRAPHQL_HTTP_HOST
+    // overrides it, with a warning, as the values differ.
+    register(BesuHost.BUNDLED);
+    environment.put("BESU_GRAPHQL_HTTP_HOST", "0.0.0.0");
+    environment.put("BESU_PLUGIN_GRAPHQL_HTTP_HOST", "127.0.0.1");
+
+    parse("--plugin-graphql-http-enabled");
+
+    assertThat(plugin.getConfiguration().getHost()).isEqualTo("127.0.0.1");
+    plugin.getCliOptions().logDeprecatedNames(logger, plugin.isEnabled());
+    verify(logger)
+        .warn(
+            IGNORED_WARNING,
+            "Environment variable",
+            "BESU_GRAPHQL_HTTP_HOST",
+            "BESU_PLUGIN_GRAPHQL_HTTP_HOST");
+  }
+
+  @Test
+  void deprecatedNamesAreNotReportedWhenTheServiceIsDisabled() throws IOException {
+    // the Docker image sets BESU_GRAPHQL_HTTP_HOST for every container, GraphQL enabled or not
+    register(BesuHost.BUNDLED);
+    environment.put("BESU_GRAPHQL_HTTP_HOST", "0.0.0.0");
+    environment.put("BESU_PLUGIN_GRAPHQL_HTTP_PORT", "1111");
+    environment.put("BESU_GRAPHQL_HTTP_PORT", "2222");
+
+    parse();
+
+    assertThat(plugin.isEnabled()).isFalse();
+    plugin.getCliOptions().logDeprecatedNames(logger, false);
+    verify(logger, never()).warn(anyString(), any(Object[].class));
+    // only the warning about the options without effect, as before GraphQL became a plugin
+    plugin.validateOptions(logger);
+    verify(logger)
+        .warn(
+            "{} has been ignored because {} was not defined on the command line.",
+            "--graphql-http-host and --plugin-graphql-http-port",
+            "--graphql-http-enabled");
+  }
+
+  @Test
+  void ignoredLegacyEnvironmentVariablesAreReportedWhetherTheServiceIsEnabledOrNot()
+      throws IOException {
+    register(BesuHost.EXTERNAL);
+    environment.put("BESU_GRAPHQL_HTTP_ENABLED", "true");
+
+    parse();
+
+    plugin.getCliOptions().logDeprecatedNames(logger, false);
+    verify(logger)
+        .warn(
+            anyString(),
+            eq("BESU_GRAPHQL_HTTP_ENABLED"),
+            eq("--graphql-"),
+            eq("BESU_PLUGIN_GRAPHQL_HTTP_ENABLED"));
   }
 
   @Test
@@ -482,7 +594,8 @@ class GraphQLOptionNamesTest {
 
     final String usage = commandLine.getUsageMessage(CommandLine.Help.Ansi.OFF);
 
-    assertThat(usage).contains("GraphQL Options");
+    assertThat(usage)
+        .contains("GraphQL Options (--graphql-* names are deprecated, use --plugin-graphql-*)");
     assertThat(usage).contains(allOptionNames(GraphQlOptions.OPTION_PREFIX));
     assertThat(usage).contains(allOptionNames(GraphQlOptions.LEGACY_OPTION_PREFIX));
     assertThat(usage).contains("Port for GraphQL HTTP to listen on (default: 8547)");
@@ -494,7 +607,7 @@ class GraphQLOptionNamesTest {
 
     final String usage = commandLine.getUsageMessage(CommandLine.Help.Ansi.OFF);
 
-    assertThat(usage).contains("GraphQL Options");
+    assertThat(usage).contains("GraphQL Options").doesNotContain("deprecated");
     assertThat(usage).contains(allOptionNames(GraphQlOptions.OPTION_PREFIX));
     assertThat(usage.replace("--plugin-graphql-", "")).doesNotContain("--graphql-");
     assertThat(usage).contains("(default: 5000)");

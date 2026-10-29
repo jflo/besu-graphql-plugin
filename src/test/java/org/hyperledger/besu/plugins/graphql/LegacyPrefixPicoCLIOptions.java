@@ -29,7 +29,9 @@ import picocli.CommandLine.Model.OptionSpec;
  * PicoCLIOptionsImpl}, which only accepts option names starting with {@code --plugin-<namespace>-}
  * or {@code --Xplugin-<namespace>-}, extended to also accept the given prefixes (for the GraphQL
  * plugin, {@code --graphql-}). The checks, the error log and the exception are the same as in
- * {@code PicoCLIOptionsImpl}: every name is checked before any option is added to the command.
+ * {@code PicoCLIOptionsImpl}: every name is checked before any option is added to the command. A
+ * bundling Besu accepts the additional prefixes only while a bundled plugin registers; this double
+ * stands for that case (see MAINTAINERS.md, "Contracts with Besu").
  */
 final class LegacyPrefixPicoCLIOptions implements PicoCLIOptions {
 

@@ -114,9 +114,10 @@ public class GraphQLPlugin implements BesuPlugin {
   /**
    * Validates the GraphQL options once the command line is parsed: a negative maximum block range
    * is rejected with the same error as before the GraphQL service became a plugin, the options that
-   * have no effect are logged, and so are the deprecated option names in use. It is called before
-   * the external services start, or at the latest when the plugin starts. Only the first successful
-   * call has an effect. The warnings are logged with this plugin's logger.
+   * have no effect are logged, and so are the deprecated option names in use when the service is
+   * enabled. It is called before the external services start, or at the latest when the plugin
+   * starts. Only the first successful call has an effect. The warnings are logged with this
+   * plugin's logger.
    *
    * @throws CommandLine.ParameterException if an option value is invalid
    * @throws IllegalArgumentException if an option value is invalid and the command line the options
@@ -148,7 +149,7 @@ public class GraphQLPlugin implements BesuPlugin {
     final CommandLine commandLine = cliOptions.getCommandLine();
     if (commandLine != null) {
       graphQlOptions.validate(logger, commandLine, cliOptions::nameInUse);
-      cliOptions.logDeprecatedNames(LOG);
+      cliOptions.logDeprecatedNames(LOG, isEnabled());
     } else {
       graphQlOptions.validateWithoutCommandLine();
     }
