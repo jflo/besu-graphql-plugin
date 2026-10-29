@@ -182,15 +182,14 @@ tasks.register('integrationTest', Test) {
   }
 }
 
-// The plugin always ships graphql-java and its runtime dependencies in its distribution. Besu
-// versions that still have their own GraphQL service also ship them, so besuPlugin would treat them
-// as provided by Besu and leave them out; but the same zip must also work on (and be bundled with)
-// Besu versions that no longer ship them. When Besu does provide them, Besu's copy is loaded first.
+// The plugin always ships graphql-java and java-dataloader in its distribution. Besu versions that
+// still have their own GraphQL service also ship them, so besuPlugin would treat them as provided by
+// Besu and leave them out; but the same zip must also work on (and be bundled with) Besu versions
+// that no longer ship them. When Besu does provide them, Besu's copy is loaded first. Their other
+// runtime dependencies (reactive-streams, jspecify) are provided by every Besu, GraphQL or not.
 def alwaysShipped = [
   'com.graphql-java:graphql-java',
   'com.graphql-java:java-dataloader',
-  'org.reactivestreams:reactive-streams',
-  'org.jspecify:jspecify',
 ]
 tasks.named('resolveBesuProvidedDependencies') {
   inputs.property('alwaysShipped', alwaysShipped)
@@ -222,7 +221,7 @@ def verifyDistribution = tasks.register('verifyDistribution') {
         throw new GradleException("Plugin distribution ${zip.get().asFile} has no entry matching ${pattern}: ${entries}")
       }
     }
-    def unexpected = entries.findAll { it ==~ /(besu-plugin-api|besu-datatypes|vertx-core|jackson-databind|guava|picocli)-.*\.jar/ }
+    def unexpected = entries.findAll { it ==~ /(besu-plugin-api|besu-datatypes|vertx-core|jackson-databind|guava|picocli|reactive-streams|jspecify)-.*\.jar/ }
     if (!unexpected.isEmpty()) {
       throw new GradleException("Plugin distribution contains jars that Besu provides: ${unexpected}")
     }

@@ -45,8 +45,8 @@ besu-eth/besu#11744.
 If you select plugins with Besu's `--plugins` option, include `GraphQLPlugin`.
 
 The zip contains the plugin jar and the libraries Besu does not provide (graphql-java,
-java-dataloader, reactive-streams). Everything else (Vert.x, Jackson, Guava, picocli, Tuweni,
-SLF4J and the plugin API) comes from Besu.
+java-dataloader). Everything else (Vert.x, Jackson, Guava, picocli, Tuweni, SLF4J, the plugin API
+and the other libraries graphql-java uses) comes from Besu.
 
 ## Usage
 
