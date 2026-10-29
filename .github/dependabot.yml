@@ -1,0 +1,16 @@
+# Update pull requests for the GitHub Actions and the libraries the plugin ships itself
+# (graphql-java, java-dataloader) and builds with. Besu's own artifacts and BOM follow the Besu
+# version in gradle/libs.versions.toml, which maintainers bump for each Besu release
+# (MAINTAINERS.md, "Release cadence").
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: gradle
+    directory: /
+    schedule:
+      interval: weekly
+    ignore:
+      - dependency-name: "org.hyperledger.besu*"

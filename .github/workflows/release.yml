@@ -33,14 +33,21 @@ jobs:
           echo "::error::The plugin is built against Besu $besu, which is not released. Point gradle/libs.versions.toml at a Besu release first."
           exit 1
         fi
-        if ! grep -q "^## ${GITHUB_REF_NAME}\b" CHANGELOG.md; then
-          echo "::error::CHANGELOG.md has no '## ${GITHUB_REF_NAME}' section."
+        # the same match as the release notes extraction below: exactly '## X.Y.Z', not '## X.Y.Z-rc1'
+        awk -v tag="## ${GITHUB_REF_NAME}" '$0 == tag || index($0, tag " ") == 1 {found=1; next} found && /^## / {exit} found {print}' CHANGELOG.md > release-notes.md
+        if ! grep -q '[^[:space:]]' release-notes.md; then
+          echo "::error::CHANGELOG.md has no '## ${GITHUB_REF_NAME}' section, or it is empty."
           exit 1
         fi
 
     - name: Prepare Besu
       id: besu
-      run: echo "home=$(scripts/prepare-besu.sh | tail -n 1)" >> "$GITHUB_OUTPUT"
+      # bash runs with -e and pipefail, so a failure of the script fails the step
+      shell: bash
+      run: |
+        home="$(scripts/prepare-besu.sh | tail -n 1)"
+        test -x "$home/bin/besu"
+        echo "home=$home" >> "$GITHUB_OUTPUT"
 
     - name: Build
       run: ./gradlew build -Pversion="${GITHUB_REF_NAME}"
@@ -51,12 +58,48 @@ jobs:
     - name: Create the GitHub release
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      shell: bash
       run: |
-        awk -v tag="## ${GITHUB_REF_NAME}" '$0 ~ "^"tag"( |$)" {found=1; next} found && /^## / {exit} found {print}' CHANGELOG.md > release-notes.md
+        zip="build/distributions/besu-graphql-plugin-${GITHUB_REF_NAME}.zip"
+        jar="build/libs/besu-graphql-plugin-${GITHUB_REF_NAME}.jar"
+        for file in "$zip" "$jar"; do
+          (cd "$(dirname "$file")" && sha256sum "$(basename "$file")" > "$(basename "$file").sha256")
+        done
         gh release create "${GITHUB_REF_NAME}" \
           --verify-tag \
           --title "${GITHUB_REF_NAME}" \
           --notes-file release-notes.md \
           $([[ "${GITHUB_REF_NAME}" == *-* ]] && echo --prerelease) \
-          build/distributions/besu-graphql-plugin-${GITHUB_REF_NAME}.zip \
-          build/libs/besu-graphql-plugin-${GITHUB_REF_NAME}.jar
+          "$zip" "$zip.sha256" "$jar" "$jar.sha256"
+
+    # The Maven artifacts that Besu's build fetches to bundle the plugin are built by JitPack from
+    # the tag on first request. Request them, wait for them, and record their checksums in the
+    # release notes for Besu's gradle/verification-metadata.xml.
+    - name: Check the JitPack artifacts
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      shell: bash
+      run: |
+        artifact="besu-graphql-plugin"
+        base="https://jitpack.io/com/github/${GITHUB_REPOSITORY_OWNER}/${GITHUB_REPOSITORY#*/}/${GITHUB_REF_NAME}/${artifact}-${GITHUB_REF_NAME}"
+        for attempt in $(seq 1 60); do
+          if curl --fail --silent --show-error --location --max-time 600 --output jitpack.pom "${base}.pom"; then
+            break
+          fi
+          if [ "$attempt" = 60 ]; then
+            echo "::error::JitPack did not build ${base}.pom, see https://jitpack.io/#${GITHUB_REPOSITORY}/${GITHUB_REF_NAME}"
+            exit 1
+          fi
+          sleep 30
+        done
+        curl --fail --silent --show-error --location --output jitpack.jar "${base}.jar"
+        {
+          echo
+          echo "### Maven artifacts"
+          echo
+          echo "\`com.github.${GITHUB_REPOSITORY_OWNER}:${artifact}:${GITHUB_REF_NAME}\` from https://jitpack.io (sha256):"
+          echo
+          echo "- \`${artifact}-${GITHUB_REF_NAME}.jar\`: \`$(sha256sum jitpack.jar | cut -d' ' -f1)\`"
+          echo "- \`${artifact}-${GITHUB_REF_NAME}.pom\`: \`$(sha256sum jitpack.pom | cut -d' ' -f1)\`"
+        } >> release-notes.md
+        gh release edit "${GITHUB_REF_NAME}" --notes-file release-notes.md

@@ -22,4 +22,6 @@ GitHub profile. This avoids issues with XYZ@users.noreply.github.com placeholder
 You can also set up a git alias, for example `git config alias.c 'commit -s'`.
 
 More info and what to do if DCO is failing on your PR in the
-[Besu wiki](https://wiki.hyperledger.org/display/BESU/DCO).
+[Working with DCO](https://github.com/besu-eth/besu/wiki/Contributing-Working-with-DCO) page of the
+Besu wiki. The `DCO` check requires a `Signed-off-by` line that matches the commit's author or
+committer, name and email.

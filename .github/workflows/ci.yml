@@ -35,7 +35,12 @@ jobs:
     # otherwise downloads the released Besu distribution for the integration tests.
     - name: Prepare Besu
       id: besu
-      run: echo "home=$(scripts/prepare-besu.sh | tail -n 1)" >> "$GITHUB_OUTPUT"
+      # bash runs with -e and pipefail, so a failure of the script fails the step
+      shell: bash
+      run: |
+        home="$(scripts/prepare-besu.sh | tail -n 1)"
+        test -x "$home/bin/besu"
+        echo "home=$home" >> "$GITHUB_OUTPUT"
 
     # spotless, errorprone, javadoc, unit and end-to-end tests, distribution checks
     - name: Build
