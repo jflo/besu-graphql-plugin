@@ -15,7 +15,10 @@ That is 191 commits, going back to the original EIP-1767 implementation in 2019.
 commit message ends with an `Imported-From: besu-eth/besu@<sha>` trailer that names the
 original commit. Bare PR references were qualified, as `besu-eth/besu#N`, or as
 `PegaSysEng/pantheon#N` for commits made before 2019-09-16, so that they do not link to this
-repository's own pull requests.
+repository's own pull requests. A few security fixes were merged into Besu from its private
+security repository and carry that repository's PR numbers (for example
+`fix(graphql): cap logs(filter) block range ... (besu-eth/besu#114)`); for those, follow the
+`Imported-From` commit instead of the PR link.
 
 After the import, the plugin module was moved to the repository root (a pure rename) and the
 legacy core files were deleted from the working tree. They are still in history.
@@ -23,8 +26,11 @@ legacy core files were deleted from the working tree. They are still in history.
 ## Following a file back into Besu core
 
 The plugin's files were created by the import commit as new files, alongside the legacy core
-files they were adapted from. Git therefore does not record them as renames, and
-`git log --follow` stops at that commit. To go further back:
+files they were adapted from. `git log --follow` detects them as copies of their legacy
+counterparts when they are similar enough, and then continues into the Besu core history (this
+is the case for most files, for example `GraphQLDataFetchers.java`). For files that were rewritten
+for the plugin API (for example `ChainQueries.java`, which replaces Besu's `BlockchainQueries`),
+it stops at the import commit. To go further back:
 
 ```sh
 # history of the legacy counterpart (paths in the table below)
