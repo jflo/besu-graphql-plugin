@@ -146,6 +146,42 @@ tasks.named('test') {
   }
 }
 
+// Integration tests: install the plugin distribution into a real Besu installation and run it.
+// Needs -PbesuHome=<unpacked Besu distribution> (or BESU_HOME); skipped otherwise. Not part of check.
+sourceSets {
+  integrationTest {
+    compileClasspath += sourceSets.main.output
+    runtimeClasspath += sourceSets.main.output
+  }
+}
+
+configurations {
+  integrationTestImplementation.extendsFrom testImplementation
+  integrationTestRuntimeOnly.extendsFrom testRuntimeOnly
+}
+
+def besuHomeUnderTest = providers.gradleProperty('besuHome').orElse(providers.environmentVariable('BESU_HOME'))
+
+tasks.register('integrationTest', Test) {
+  description = 'Runs the plugin distribution in the Besu installation given by -PbesuHome.'
+  group = 'verification'
+  testClassesDirs = sourceSets.integrationTest.output.classesDirs
+  classpath = sourceSets.integrationTest.runtimeClasspath
+  useJUnitPlatform()
+  def zip = tasks.named('distZip').flatMap { it.archiveFile }
+  inputs.file(zip)
+  systemProperty 'plugin.distribution', zip.get().asFile.absolutePath
+  if (besuHomeUnderTest.isPresent()) {
+    systemProperty 'besu.home.under.test', file(besuHomeUnderTest.get()).absolutePath
+  }
+  // Always re-run: the Besu installation is not tracked by Gradle.
+  outputs.upToDateWhen { false }
+  testLogging {
+    events 'passed', 'skipped', 'failed'
+    exceptionFormat 'full'
+  }
+}
+
 // The plugin always ships graphql-java and its runtime dependencies in its distribution. Besu
 // versions that still have their own GraphQL service also ship them, so besuPlugin would treat them
 // as provided by Besu and leave them out; but the same zip must also work on (and be bundled with)
