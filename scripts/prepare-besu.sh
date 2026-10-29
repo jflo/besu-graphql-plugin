@@ -25,12 +25,12 @@
 #   the local Maven repository under that version and installs its distribution. Building Besu
 #   needs a JDK 25 (JAVA_HOME, or java on the PATH).
 #
-# Usage: scripts/prepare-besu.sh [work directory, default: build/besu]
+# Usage: scripts/prepare-besu.sh [work directory, default: .besu, kept out of build/ so ./gradlew clean does not delete it]
 
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
-work="${1:-$root/build/besu}"
+work="${1:-$root/.besu}"
 version="$(sed -nE 's/^besu *= *"([^"]+)".*/\1/p' "$root/gradle/libs.versions.toml")"
 property() { sed -nE "s/^$1=(.*)$/\1/p" "$root/gradle.properties"; }
 
