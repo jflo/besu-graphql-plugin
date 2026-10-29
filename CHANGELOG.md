@@ -22,7 +22,15 @@ release that contains besu-eth/besu#11744.
   defaults and validation of Besu's former `--graphql-*` options.
 - The plugin is discovered from Besu's plugins directory; the distribution zip ships graphql-java
   and java-dataloader, which Besu no longer provides.
-- Integration tests against a real Besu installation (`./gradlew integrationTest -PbesuHome=...`).
+- Integration tests against a real Besu installation (`./gradlew integrationTest -PbesuHome=...`),
+  as an installed plugin and, with a Besu that bundles plugins, as the bundled plugin.
+- The distribution zip, and the plugin jar under `META-INF`, contain the plugin's `LICENSE` and a
+  `NOTICE` for graphql-java (MIT) and java-dataloader (Apache-2.0). Install the jars only:
+  `unzip -j besu-graphql-plugin-<version>.zip '*.jar' -d <besu>/plugins`.
+- `./gradlew check` fails if the main code uses Besu internals instead of the plugin API
+  (`verifyPluginApiOnly`), or if the distribution ships a library the targeted Besu provides.
+- Releases attach `.sha256` files for the zip and jar, have JitPack build the Maven artifacts and
+  record the sha256 of their jar and POM in the release notes.
 
 ### Deprecated
 - When Besu bundles the plugin, the former option names `--graphql-*` (TOML keys `graphql-*`,
@@ -30,3 +38,8 @@ release that contains besu-eth/besu#11744.
   options and log a deprecation warning. The plugin offers them only when Besu loads it from its
   `bundled-plugins` directory (or `-Dbesu.plugin.graphql.legacy-option-names=true` is set). They,
   and the bundling of the plugin in Besu's distribution, will be removed in a future release.
+  The deprecation warnings are logged only when the GraphQL service is enabled, and a deprecated
+  name whose value is ignored, because the configuration file or the environment also gives the
+  option, with another value, under its `--plugin-graphql-*` name, logs a warning saying so. The
+  help shows the GraphQL options under "GraphQL Options (--graphql-* names are deprecated, use
+  --plugin-graphql-*)".

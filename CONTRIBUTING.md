@@ -17,7 +17,8 @@ Thanks for taking the time to contribute! This plugin serves Besu's
 ## Development
 
 You need git and a JDK 17 or newer to run Gradle. The build compiles with a Java 25 toolchain,
-which Gradle downloads if it is not installed.
+which Gradle downloads if it is not installed. While the plugin targets an unreleased Besu, the
+first step below builds Besu, which needs a JDK 25 (`JAVA_HOME`, or `java` on the `PATH`).
 
 ```sh
 ./gradlew build            # spotless check, errorprone, javadoc, all tests, distribution checks
@@ -38,8 +39,9 @@ unreleased `-SNAPSHOT` version, run `scripts/prepare-besu.sh` once to build and 
   behaviour change and needs a changelog entry.
 - **Plugin API only.** The main source set may only use Besu's plugin API
   (`org.hyperledger.besu.plugin.*`), `org.hyperledger.besu.datatypes`/`evm` types exposed by it,
-  and third-party libraries. Besu internals are for tests only. If the plugin needs something the
-  API lacks, propose the API change to Besu first.
+  and third-party libraries; `./gradlew check` fails otherwise (`verifyPluginApiOnly` in
+  `build.gradle` lists the allowed packages). Besu internals are for tests only. If the plugin
+  needs something the API lacks, propose the API change to Besu first.
 - **Dependencies.** Libraries Besu ships are compileOnly (the besu-plugin-distribution Gradle plugin
   takes care of this). Anything else ends up in the plugin distribution zip; keep that list short.
 - **Option names.** New options are named `--plugin-graphql-*` only. The deprecated `--graphql-*`

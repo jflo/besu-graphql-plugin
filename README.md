@@ -17,14 +17,22 @@ The plugin needs the plugin API added to Besu by
 [besu-eth/besu#11744](https://github.com/besu-eth/besu/pull/11744) (chain query, call simulation
 and network endpoint services). No Besu release contains it yet.
 
-| Plugin version | Built and tested against Besu | Works with Besu |
+| Plugin version | Built and tested against Besu | Bundled with Besu |
 | --- | --- | --- |
-| Unreleased (`0.1.0-SNAPSHOT`) | `26.11.0-graphqlapi-SNAPSHOT` (besu-eth/besu#11744 at `f417ae0e6d`, built locally) | the first Besu release containing besu-eth/besu#11744, and later |
+| Unreleased (`0.1.0-SNAPSHOT`) | `26.11.0-graphqlapi-SNAPSHOT` (besu-eth/besu#11744 at `f417ae0e6d`, built locally) | none yet |
 
 The Besu version the plugin is built against is `besu` in
-[gradle/libs.versions.toml](gradle/libs.versions.toml); `./gradlew check` verifies that the table
-above names it. It must be bumped to a real Besu release as soon as one contains
+[gradle/libs.versions.toml](gradle/libs.versions.toml); `./gradlew check` verifies that the first
+row of the table above names it. It must be bumped to a real Besu release as soon as one contains
 besu-eth/besu#11744.
+
+Install the plugin release built against your Besu version. At startup, Besu compares the Besu
+version a plugin in its `plugins` directory was built against (recorded in the plugin jar's
+`META-INF/plugin-artifacts-catalog.json`) with its own version: if they differ, Besu logs a warning
+with the default `--plugins-verification-mode=NONE`, and refuses to start with
+`--plugins-verification-mode=FULL`. As the plugin uses only Besu's plugin API, a release usually
+works with later Besu versions too, but only the version in the table is tested. A copy bundled with
+Besu is not verified this way: Besu's release picks and tests the plugin version it bundles.
 
 ## Install
 
@@ -34,7 +42,7 @@ besu-eth/besu#11744.
 2. Unzip its jars into Besu's `plugins` directory:
 
    ```sh
-   unzip -j besu-graphql-plugin-<version>.zip -d "$BESU_HOME/plugins"
+   unzip -j besu-graphql-plugin-<version>.zip '*.jar' -d "$BESU_HOME/plugins"
    ```
 
    With Docker, mount or copy them into `/opt/besu/plugins`. Another directory can be used with
@@ -45,8 +53,9 @@ besu-eth/besu#11744.
 If you select plugins with Besu's `--plugins` option, include `GraphQLPlugin`.
 
 The zip contains the plugin jar and the libraries Besu does not provide (graphql-java,
-java-dataloader). Everything else (Vert.x, Jackson, Guava, picocli, Tuweni, SLF4J, the plugin API
-and the other libraries graphql-java uses) comes from Besu.
+java-dataloader), with the plugin's `LICENSE` and a `NOTICE` for those libraries. Everything else
+(Vert.x, Jackson, Guava, picocli, Tuweni, SLF4J, the plugin API and the other libraries graphql-java
+uses) comes from Besu.
 
 ## Usage
 
@@ -63,7 +72,7 @@ Like every Besu option, each option can also be set in the TOML configuration fi
 | Option | Deprecated name (bundled Besu only) | Default | Description |
 | --- | --- | --- | --- |
 | `--plugin-graphql-http-enabled` | `--graphql-http-enabled` | `false` | Set to start the GraphQL HTTP service |
-| `--plugin-graphql-http-host=<HOST>` | `--graphql-http-host` | Besu's default host address (`127.0.0.1`) | Host for GraphQL HTTP to listen on |
+| `--plugin-graphql-http-host=<HOST>` | `--graphql-http-host` | the value of Besu's `--p2p-host` (`127.0.0.1` unless `--p2p-host` is set) | Host for GraphQL HTTP to listen on |
 | `--plugin-graphql-http-port=<PORT>` | `--graphql-http-port` | `8547` | Port for GraphQL HTTP to listen on |
 | `--plugin-graphql-http-cors-origins` | `--graphql-http-cors-origins` | none | Comma separated origin domain URLs for CORS validation (`all` or `*` for any) |
 | `--plugin-graphql-tls-enabled` | `--graphql-tls-enabled` | `false` | Enable TLS for GraphQL HTTP service |
@@ -75,8 +84,8 @@ Like every Besu option, each option can also be set in the TOML configuration fi
 | `--plugin-graphql-max-blocks-range` | `--graphql-max-blocks-range` | `5000` | Maximum number of blocks a single `blocks(from,to)` query may span; `0` for no limit |
 
 The service also follows these Besu options, as Besu's core GraphQL service did:
-`--host-allowlist` (allowed `Host` headers), `--Xhttp-timeout-seconds` (request timeout) and
-`--rpc-max-log-filter-addresses` (addresses per `logs` filter).
+`--host-allowlist` (allowed `Host` headers), `--Xhttp-timeout-seconds` (request timeout),
+`--rpc-max-log-filter-addresses` (addresses per `logs` filter) and `--p2p-host` (the default host).
 
 ### Endpoint
 
@@ -105,21 +114,41 @@ WARN | GraphQLPlugin | Option --graphql-http-enabled is deprecated and will be r
 
 If both names are given, the command line wins over the environment, which wins over the
 configuration file, as usual; within the configuration file or the environment the
-`--plugin-graphql-*` name wins.
+`--plugin-graphql-*` name wins, and if the two values differ the plugin logs a warning that the
+deprecated one is ignored:
+
+```
+WARN | GraphQLPlugin | Environment variable BESU_GRAPHQL_HTTP_HOST is deprecated and ignored, because BESU_PLUGIN_GRAPHQL_HTTP_HOST is also set
+```
+
+These warnings are only logged when the GraphQL service is enabled. When it is not, an option given
+without `--plugin-graphql-http-enabled` (or `--graphql-http-enabled`) is reported as ignored, under
+the name it was given, as Besu did before. `besu --help` shows both names of each option, under a
+"GraphQL Options (--graphql-* names are deprecated, use --plugin-graphql-*)" heading.
+
+Besu's Docker image sets `BESU_GRAPHQL_HTTP_HOST=0.0.0.0`, as it always did, so that a container
+that sets `BESU_GRAPHQL_HTTP_HOST` itself keeps working. To move a container to the plugin's names,
+set `BESU_PLUGIN_GRAPHQL_HTTP_HOST` (it wins over the image's variable) along with the
+`--plugin-graphql-*` options.
 
 The deprecated names come with the bundling: the plugin offers them to Besu only when Besu loads
-it from the `bundled-plugins` directory of its distribution. Installed in Besu's `plugins`
-directory, which also replaces a bundled copy, the plugin only has the `--plugin-graphql-*`
-names: the deprecated names are unknown options on the command line and in the configuration
-file, and `BESU_GRAPHQL_*` environment variables are ignored (the plugin logs a warning for each).
+it from the `bundled-plugins` directory of its distribution, and Besu accepts them only from a
+bundled plugin. Installed in Besu's `plugins` directory, which also replaces a bundled copy, the
+plugin only has the `--plugin-graphql-*` names: the deprecated names are unknown options on the
+command line and in the configuration file, and `BESU_GRAPHQL_*` environment variables are ignored
+(the plugin logs a warning for each).
 
-The system property `besu.plugin.graphql.legacy-option-names` overrides this: start Besu with
-`BESU_OPTS=-Dbesu.plugin.graphql.legacy-option-names=true` to have an installed plugin offer the
-deprecated names too, or `=false` to keep a bundled one from offering them. The plugin cannot ask
-Besu which names it accepts, so if Besu refuses them, the plugin falls back to the
+The system property `besu.plugin.graphql.legacy-option-names` overrides what the plugin offers:
+start Besu with `BESU_OPTS=-Dbesu.plugin.graphql.legacy-option-names=false` to keep a bundled copy
+from offering the deprecated names. `=true` makes an installed copy offer them too, which only
+helps with a Besu that accepts them from installed plugins (no Besu release does). The plugin
+cannot ask Besu which names it accepts, so if Besu refuses them, the plugin falls back to the
 `--plugin-graphql-*` names; Besu then logs an error for each refused name (`Plugin option
 --graphql-http-enabled did not have the expected prefix of --plugin-graphql-`), followed by an
 INFO line from the plugin saying they can be ignored.
+
+How the plugin detects the bundling and finds the names the user gave relies on Besu behaviour
+that is not part of the plugin API; see [MAINTAINERS.md](MAINTAINERS.md), "Contracts with Besu".
 
 ## Relationship to Besu and deprecation plan
 
@@ -139,7 +168,8 @@ INFO line from the plugin saying they can be ignored.
 ## Building
 
 Requires git and a JDK 17+ to run Gradle; the code compiles with a Java 25 toolchain, which Gradle
-downloads when needed.
+downloads when needed. While the plugin targets an unreleased Besu (see below),
+`scripts/prepare-besu.sh` builds Besu, which needs a JDK 25 (`JAVA_HOME`, or `java` on the `PATH`).
 
 ```sh
 ./gradlew build          # format check, errorprone, javadoc, tests, distribution checks
@@ -162,16 +192,19 @@ from the local Maven repository (`~/.m2`, Besu artifacts only). Publish them onc
 scripts/prepare-besu.sh
 ```
 
-which clones Besu from `besuSnapshotRepository` at `besuSnapshotRef` (`gradle.properties`), runs
+which fetches Besu from `besuSnapshotRepository` at the commit `besuSnapshotCommit`
+(`gradle.properties`; it fetches again when that changes), runs
 `./gradlew publishToMavenLocal installDist -Pversion=<besu version>` there and prints the path of the
-installed Besu. CI does the same. Equivalently, from a Besu checkout of that branch:
+installed Besu. CI does the same. Equivalently, from a Besu checkout of that commit:
 `./gradlew publishToMavenLocal -Pversion=26.11.0-graphqlapi-SNAPSHOT`.
 
 ### Maven coordinates
 
 `com.github.jflo:besu-graphql-plugin:<version>` (jar, sources, javadoc and the distribution zip as
-`@zip`). Until the plugin is published to Maven Central, released versions are available from
-[JitPack](https://jitpack.io/#jflo/besu-graphql-plugin), which builds them from the release tags:
+`@zip`). Until the plugin is published to Maven Central (or Besu's Maven repository), released
+versions are available from [JitPack](https://jitpack.io/#jflo/besu-graphql-plugin), which builds
+them from the release tags. The release workflow has JitPack build them and records the sha256 of
+the jar and POM in the release notes, for Besu's dependency verification:
 
 ```groovy
 repositories { maven { url 'https://jitpack.io' } }
@@ -190,8 +223,12 @@ The group changes when the repository is transferred to its maintenance team (se
   Besu's core service (`graphqlextra/`). Option names are tested with Besu's own option parsing
   and configuration file/environment handling, as an external and as a bundled plugin.
 - `./gradlew integrationTest -PbesuHome=<Besu installation>`: installs the distribution zip into
-  that Besu, starts it and queries the plugin over HTTP. `scripts/prepare-besu.sh` prints a
-  suitable installation. Skipped without `-PbesuHome`.
+  that Besu, starts it and queries the plugin over HTTP. With a Besu that bundles plugins (it has a
+  `bundled-plugins` directory), it also runs the zip as the bundled plugin, with the deprecated
+  names. `scripts/prepare-besu.sh` prints a suitable installation. Skipped without `-PbesuHome`.
+- `./gradlew check` also verifies that the main code uses only Besu's plugin API
+  (`verifyPluginApiOnly`) and that the distribution has no jar Besu provides
+  (`verifyDistribution`).
 
 ## Releasing
 
@@ -202,10 +239,13 @@ Plugin versions are semantic versions (`X.Y.Z`), independent of Besu's version.
 2. Rename `## Unreleased` in [CHANGELOG.md](CHANGELOG.md) to `## X.Y.Z`, set `version` in
    `gradle.properties` to the next `-SNAPSHOT`, and merge that.
 3. Tag the merge commit `X.Y.Z` (signed) and push the tag. The
-   [release workflow](.github/workflows/release.yml) builds and tests that version against Besu and
-   creates the GitHub release with the distribution zip and jar and the changelog section as notes.
-4. Request `com.github.jflo:besu-graphql-plugin:X.Y.Z` from JitPack once to have it built.
-5. Tell the Besu release engineer, if Besu should bundle the new version.
+   [release workflow](.github/workflows/release.yml) builds and tests that version against Besu,
+   creates the GitHub release with the distribution zip and jar (and their `.sha256`) and the
+   changelog section as notes, then has JitPack build `com.github.jflo:besu-graphql-plugin:X.Y.Z`
+   and adds the sha256 of its jar and POM to the notes. If that last step fails, the GitHub
+   release exists but Besu cannot bundle the version: check the JitPack build log.
+4. Tell the Besu release engineer, if Besu should bundle the new version, with the checksums from
+   the release notes.
 
 ## License
 

@@ -18,14 +18,55 @@ Maintainers:
 
 ## Release cadence
 
-Besu releases about monthly. For each Besu release, a maintainer:
+Besu releases about monthly. Besu warns about (or, with `--plugins-verification-mode=FULL`, refuses)
+an installed plugin built against another Besu version (README.md, "Compatibility"), so there is a
+plugin release for every Besu release, even when nothing else changed. Once Besu X.Y.Z is
+released, a maintainer:
 
-1. bumps `besu` in `gradle/libs.versions.toml` and the compatibility table in README.md;
-2. runs `./gradlew build` and the integration tests against that Besu;
-3. adds a CHANGELOG entry and, if anything changed, releases a new plugin version.
+1. bumps `besu` in `gradle/libs.versions.toml` to X.Y.Z, and adds a row for the new plugin version
+   at the top of the compatibility table in README.md (`./gradlew check` verifies the first row);
+2. fixes what the bump breaks: usually only the test harness (see "Besu internals in the tests");
+3. runs `./gradlew build` and the integration tests against that Besu
+   (`./gradlew integrationTest -PbesuHome=<Besu X.Y.Z>`);
+4. adds a CHANGELOG entry ("Built against Besu X.Y.Z") and releases a new plugin version.
 
-While Besu bundles the plugin, the Besu release engineer picks the plugin version to bundle, so
-plugin releases should be made ahead of the Besu release freeze.
+### Bundled releases
+
+While Besu bundles the plugin, Besu's build fetches the version named by `graphqlPluginVersion` in
+Besu's `gradle.properties`, with checksums in Besu's `gradle/verification-metadata.xml`. A plugin
+release can only be built against a released Besu, so Besu X.Y.Z bundles a plugin release built
+against an earlier Besu (normally the latest plugin release, built against the previous Besu
+release). That is fine: Besu does not verify the Besu version of a bundled plugin, and its Docker
+image tests check that the bundled plugin serves GraphQL. Before the Besu release freeze, tell the
+Besu release engineer which plugin version to bundle, with the sha256 of its jar and POM from the
+release notes; they are only needed again when the bundled version changes.
+
+## Contracts with Besu
+
+Besides the plugin API, the plugin relies on the following Besu behaviour. None of it is part of
+the plugin API, so check it when Besu changes the code named here; the plugin's tests cover each
+point against the Besu it is built with, and the `asBundledWithBesuOffersTheDeprecatedNames`
+integration test covers them against a bundling Besu distribution.
+
+| The plugin relies on | Plugin code | Besu code |
+| --- | --- | --- |
+| Besu loads bundled plugins from a directory named `bundled-plugins` (the plugin offers the deprecated names only from there) | `GraphQLCliOptions.BUNDLED_PLUGINS_DIRECTORY` | `PluginConfiguration.getBundledPluginsDir()` (ethereum/core) |
+| Besu accepts the `--graphql-` prefix for the `graphql` namespace from a bundled plugin, and checks every name before it adds any option | `GraphQLCliOptions.register` | `PicoCLIOptionsImpl.LEGACY_OPTION_PREFIXES` and `addPicoCLIOptions` (app) |
+| The options added through `PicoCLIOptions` become a mixin of Besu's root command, reachable through `OptionSpec.command()` | `GraphQLCliOptions.getCommandLine` | `PicoCLIOptionsImpl.addPicoCLIOptions` |
+| Besu's default value provider reads the environment, then the configuration file, trying each name of an option in turn; environment variables are named `BESU_` + the option name in upper case with `_` | `GraphQLCliOptions.legacyUse`, `ignoredLegacyValue`, `envVarName` | `EnvironmentVariableDefaultProvider`, `TomlConfigurationDefaultProvider`, `CascadingDefaultProvider` (app, `cli.util`) |
+| A `ParameterException` from `beforeExternalServices` fails Besu's command line | `GraphQLPlugin.validateOptions` | `BesuPluginContextImpl.beforeExternalServices` |
+
+The longer-term fix is a plugin API for these needs (option aliases with deprecation, or telling a
+plugin that it is bundled); propose it to Besu before relying on more of Besu's internals.
+
+## Besu internals in the tests
+
+The main code may only use Besu's plugin API (`./gradlew check` enforces it, see
+`verifyPluginApiOnly`), but the tests build a real Besu chain with Besu internals:
+`TestChainServices` (blockchain, world state, transaction simulator and pool services) and
+`BesuHost`/`LegacyPrefixPicoCLIOptions` (Besu's option handling). Their constructors change often,
+so a Besu bump regularly breaks the test compilation while the main code still compiles: fix it in
+those classes, which keep all of that wiring in one place, without touching the tests themselves.
 
 ## Adopting the repository (maintenance team hand-over)
 
@@ -49,8 +90,12 @@ The repository is currently `jflo/besu-graphql-plugin`. A team adopts it as foll
 6. **Besu**: tell the Besu maintainers the new coordinates, so Besu's build fetches the bundled
    plugin from the new location.
 7. **Snapshot source**: once a Besu release contains besu-eth/besu#11744, point `besu` at it and
-   delete `besuSnapshotRepository`/`besuSnapshotRef` from `gradle.properties` together with the
-   `mavenLocal()` repository in `build.gradle`.
+   delete `besuSnapshotRepository`/`besuSnapshotCommit` from `gradle.properties` together with the
+   `mavenLocal()` repository in `build.gradle`. Until then, a new commit of besu-eth/besu#11744 is
+   picked up by changing `besuSnapshotCommit`.
+8. **Maven repository**: publish releases to Maven Central or Besu's Maven repository (for example
+   under `org.hyperledger.besu.plugins`) instead of JitPack, so that Besu's build does not depend
+   on JitPack building the artifacts on demand.
 
 ## Becoming a maintainer
 
