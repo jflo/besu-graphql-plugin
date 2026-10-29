@@ -1,0 +1,257 @@
+/*
+ * Copyright contributors to Besu.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on
+ * an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import net.ltgt.gradle.errorprone.CheckSeverity
+
+plugins {
+  id 'java-library'
+  id 'maven-publish'
+  alias libs.plugins.spotless
+  // Puts Besu's BOM and every artifact Besu ships on compileOnly/testImplementation, and builds the
+  // plugin distribution zip (distZip) with only the jars Besu does not already provide.
+  // https://github.com/Consensys-Incorporated/besu-plugin-gradle-plugin
+  alias libs.plugins.besu.plugin.distribution
+  alias libs.plugins.errorprone
+}
+
+def targetBesuVersion = providers.gradleProperty('besuVersion').orElse(libs.versions.besu.asProvider()).get()
+
+repositories {
+  // Besu builds published locally with `./gradlew publishToMavenLocal` (see README.md), needed
+  // until a Besu release contains the plugin API this plugin uses. Only Besu artifacts are taken
+  // from it. The besu-plugin-distribution plugin adds Besu's own Maven repository.
+  mavenLocal {
+    content { includeGroupAndSubgroups 'org.hyperledger.besu' }
+  }
+  mavenCentral()
+}
+
+besuPlugin {
+  besuVersion = targetBesuVersion
+}
+
+java {
+  toolchain {
+    languageVersion = JavaLanguageVersion.of(25)
+  }
+  withSourcesJar()
+  withJavadocJar()
+}
+
+dependencies {
+  // Everything else the main code uses (plugin API, datatypes, Vert.x, Jackson, Guava, picocli,
+  // Tuweni, SLF4J, auto-service) is provided by Besu and added to compileOnly by besuPlugin.
+  // graphql-java is not: Besu no longer ships it once its core GraphQL service is removed.
+  implementation libs.graphql.java
+  implementation libs.java.dataloader
+
+  errorprone libs.errorprone.core
+  // https://github.com/besu-eth/besu-errorprone-checks
+  errorprone libs.besu.errorprone.checks
+
+  // Versions come from the Besu BOM. The Besu modules (core services, BlockchainSetupUtil from the
+  // besu-ethereum-core test-support jar, BlockTestUtil and the test chains from besu-testutil) are
+  // added to testImplementation by besuPlugin.
+  testImplementation 'com.squareup.okhttp3:okhttp'
+  testImplementation 'io.netty:netty-handler'
+  testImplementation 'org.assertj:assertj-core'
+  testImplementation 'org.bouncycastle:bcpkix-jdk18on'
+  testImplementation 'org.junit.jupiter:junit-jupiter'
+  testImplementation 'org.mockito:mockito-core'
+  testImplementation 'org.mockito:mockito-junit-jupiter'
+
+  testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+// Same compiler checks as Besu.
+tasks.withType(JavaCompile).configureEach {
+  options.compilerArgs += [
+    '-Xlint:unchecked',
+    '-Xlint:cast',
+    '-Xlint:rawtypes',
+    '-Xlint:overloads',
+    '-Xlint:divzero',
+    '-Xlint:finally',
+    '-Xlint:static',
+    '-Werror',
+  ]
+  options.encoding = 'UTF-8'
+  options.errorprone {
+    disableWarningsInGeneratedCode = true
+    // Our equals need to be symmetric, this checker doesn't respect that.
+    check('EqualsGetClass', CheckSeverity.OFF)
+    // We like to use futures with no return values.
+    check('FutureReturnValueIgnored', CheckSeverity.OFF)
+    // We use the JSR-305 annotations instead of the Google annotations.
+    check('ImmutableEnumChecker', CheckSeverity.OFF)
+    // This is a style check instead of an error-prone pattern.
+    check('UnnecessaryParentheses', CheckSeverity.OFF)
+    // This check is broken after Java 12. See https://github.com/google/error-prone/issues/1352
+    check('TypeParameterUnusedInFormals', CheckSeverity.OFF)
+    // The GraphQL schema exposes a transaction's type as its ordinal, as Besu does.
+    check('EnumOrdinal', CheckSeverity.OFF)
+    // Necessary for usages of CompletableFuture<Void>.
+    check('VoidUsed', CheckSeverity.OFF)
+    check('FieldCanBeFinal', CheckSeverity.WARN)
+    check('InsecureCryptoUsage', CheckSeverity.WARN)
+    check('WildcardImport', CheckSeverity.WARN)
+  }
+}
+
+javadoc {
+  options.addBooleanOption('Xdoclint:all', true)
+  options.addStringOption('Xwerror', '-html5')
+  options.encoding = 'UTF-8'
+}
+
+tasks.named('jar') {
+  manifest {
+    attributes(
+      'Implementation-Title': project.name,
+      'Implementation-Version': project.version,
+      'Besu-Version': targetBesuVersion,
+      )
+  }
+}
+
+tasks.named('test') {
+  useJUnitPlatform()
+  maxHeapSize = '4g'
+  jvmArgs += [
+    // Mockito and jackson-databind do some strange reflection during tests.
+    '--add-opens',
+    'java.base/java.util=ALL-UNNAMED',
+    '--add-opens',
+    'java.base/java.util.concurrent=ALL-UNNAMED',
+    '--add-opens',
+    'java.base/java.util.concurrent.atomic=ALL-UNNAMED',
+    // RocksDB and JNA load native libraries in the end-to-end tests.
+    '--enable-native-access=ALL-UNNAMED',
+  ]
+  testLogging {
+    events 'failed'
+    exceptionFormat 'full'
+  }
+}
+
+// The plugin always ships graphql-java and its runtime dependencies in its distribution. Besu
+// versions that still have their own GraphQL service also ship them, so besuPlugin would treat them
+// as provided by Besu and leave them out; but the same zip must also work on (and be bundled with)
+// Besu versions that no longer ship them. When Besu does provide them, Besu's copy is loaded first.
+def alwaysShipped = [
+  'com.graphql-java:graphql-java',
+  'com.graphql-java:java-dataloader',
+  'org.reactivestreams:reactive-streams',
+  'org.jspecify:jspecify',
+]
+tasks.named('resolveBesuProvidedDependencies') {
+  inputs.property('alwaysShipped', alwaysShipped)
+  doLast {
+    def file = besuProvidedDependenciesFile.get().asFile
+    file.text = file.readLines().findAll { !alwaysShipped.contains(it.trim()) }.collect { it + '\n' }.join('')
+  }
+}
+
+def verifyDistribution = tasks.register('verifyDistribution') {
+  description = 'Verifies that the plugin distribution contains the plugin jar and graphql-java.'
+  group = 'verification'
+  def zip = tasks.named('distZip').flatMap { it.archiveFile }
+  inputs.file(zip)
+  doLast {
+    def entries = new java.util.zip.ZipFile(zip.get().asFile).withCloseable { z -> z.entries().collect { it.name.tokenize('/').last() } }
+    def required = [
+      ~/besu-graphql-plugin-.*\.jar/,
+      ~/graphql-java-.*\.jar/,
+      ~/java-dataloader-.*\.jar/
+    ]
+    required.each { pattern ->
+      if (!entries.any { it ==~ pattern }) {
+        throw new GradleException("Plugin distribution ${zip.get().asFile} has no entry matching ${pattern}: ${entries}")
+      }
+    }
+    def unexpected = entries.findAll { it ==~ /(besu-plugin-api|besu-datatypes|vertx-core|jackson-databind|guava|picocli)-.*\.jar/ }
+    if (!unexpected.isEmpty()) {
+      throw new GradleException("Plugin distribution contains jars that Besu provides: ${unexpected}")
+    }
+  }
+}
+
+tasks.named('check') {
+  dependsOn verifyDistribution
+}
+
+publishing {
+  publications {
+    maven(MavenPublication) {
+      artifactId = project.name
+      from components.java
+      // The installable plugin distribution: unzip it into Besu's plugins directory.
+      artifact(tasks.named('distZip'))
+      versionMapping {
+        allVariants {
+          fromResolutionResult()
+        }
+      }
+      pom {
+        name = 'Besu GraphQL plugin'
+        description = 'EIP-1767 GraphQL API for Hyperledger Besu, as a Besu plugin.'
+        url = 'https://github.com/jflo/besu-graphql-plugin'
+        licenses {
+          license {
+            name = 'Apache License, Version 2.0'
+            url = 'https://www.apache.org/licenses/LICENSE-2.0.txt'
+          }
+        }
+        scm {
+          url = 'https://github.com/jflo/besu-graphql-plugin'
+          connection = 'scm:git:https://github.com/jflo/besu-graphql-plugin.git'
+        }
+        // besuPlugin pins the Besu BOM as an enforced platform for the build; consumers must not
+        // inherit it, as the Besu that loads the plugin decides those versions.
+        withXml {
+          def root = asNode()
+          root.dependencyManagement.each { root.remove(it) }
+          root.dependencies.dependency.findAll { it.artifactId.text() == 'bom' }.each { it.parent().remove(it) }
+        }
+      }
+    }
+  }
+}
+
+// The Gradle module metadata would carry the enforced Besu BOM; publish the POM only.
+tasks.withType(GenerateModuleMetadata).configureEach {
+  enabled = false
+}
+
+spotless {
+  java {
+    target 'src/**/*.java'
+    removeUnusedImports()
+    googleJavaFormat(libs.versions.google.java.format.get())
+    importOrder 'org.hyperledger', 'java', ''
+    trimTrailingWhitespace()
+    endWithNewline()
+    // Same license header rules as Besu: files keep the header they were written with.
+    licenseHeaderFile("${rootDir}/gradle/spotless/java.former.license").named("older").onlyIfContentMatches("^/\\*\\r?\\n.*Copyright ConsenSys AG\\.")
+    licenseHeaderFile("${rootDir}/gradle/spotless/java.former.date.license").named("older.year").onlyIfContentMatches("^/\\*\\r?\\n.* Copyright \\d{4} ConsenSys AG\\.")
+    licenseHeaderFile("${rootDir}/gradle/spotless/java.current.license").named("current").onlyIfContentMatches("^(?!/\\*\\r?\\n \\*.*(ConsenSys AG|Hyperledger Besu)\\.)")
+  }
+  groovyGradle {
+    target '*.gradle'
+    leadingTabsToSpaces(2)
+    trimTrailingWhitespace()
+    endWithNewline()
+  }
+}

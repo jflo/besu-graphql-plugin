@@ -1,0 +1,32 @@
+# https://docs.gradle.org/current/userguide/version_catalogs.html#sec::toml-dependencies-format
+
+[versions]
+# The Besu version the plugin is built and tested against (used by besuPlugin in build.gradle);
+# override with -PbesuVersion=<version>. The plugin needs the plugin API added by
+# besu-eth/besu#11744. Until a Besu release contains it, this is a locally published snapshot
+# (see README.md, "Building against an unreleased Besu"); bump it to that release as soon as it exists.
+besu = "26.11.0-graphqlapi-SNAPSHOT"
+besu-plugin-distribution = "0.3.0"
+
+# graphql-java is not provided by Besu once Besu drops its core GraphQL service, so the plugin
+# declares and ships it (and java-dataloader) itself. Keep in step with the GraphQL schema features.
+graphql-java = "22.3"
+java-dataloader = "3.3.0"
+
+spotless = "8.5.1"
+# Same formatter version as Besu, so code moves between the repositories without reformatting.
+google-java-format = "1.35.0"
+errorprone = "2.36.0"
+errorprone-plugin = "4.4.0"
+besu-errorprone-checks = "1.2.0"
+
+[libraries]
+graphql-java = { module = "com.graphql-java:graphql-java", version.ref = "graphql-java" }
+java-dataloader = { module = "com.graphql-java:java-dataloader", version.ref = "java-dataloader" }
+errorprone-core = { module = "com.google.errorprone:error_prone_core", version.ref = "errorprone" }
+besu-errorprone-checks = { module = "org.hyperledger.besu:besu-errorprone-checks", version.ref = "besu-errorprone-checks" }
+
+[plugins]
+besu-plugin-distribution = { id = "net.consensys.besu-plugin-distribution", version.ref = "besu-plugin-distribution" }
+spotless = { id = "com.diffplug.spotless", version.ref = "spotless" }
+errorprone = { id = "net.ltgt.errorprone", version.ref = "errorprone-plugin" }
