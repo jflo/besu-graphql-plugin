@@ -117,6 +117,10 @@ javadoc {
 }
 
 tasks.named('jar') {
+  // Besu's distribution bundles the jar without the zip, so the jar has the license and notices too.
+  into('META-INF') {
+    from 'LICENSE', 'NOTICE'
+  }
   manifest {
     attributes(
       'Implementation-Title': project.name,
@@ -199,53 +203,119 @@ tasks.named('resolveBesuProvidedDependencies') {
   }
 }
 
-// The plugin is distributed as a zip only.
+// The plugin is distributed as a zip only, with its license and the notices of the libraries it ships.
 tasks.named('distTar') {
   enabled = false
 }
 
+distributions {
+  main {
+    contents {
+      from 'LICENSE', 'NOTICE'
+    }
+  }
+}
+
 def verifyDistribution = tasks.register('verifyDistribution') {
-  description = 'Verifies that the plugin distribution contains the plugin jar and graphql-java.'
+  description = 'Verifies that the plugin distribution contains the plugin jar, graphql-java and its license, and no jar Besu provides.'
   group = 'verification'
   def zip = tasks.named('distZip').flatMap { it.archiveFile }
+  def providedFile = tasks.named('resolveBesuProvidedDependencies').flatMap { it.besuProvidedDependenciesFile }
+  def runtimeArtifacts = configurations.runtimeClasspath.incoming.artifacts
   inputs.file(zip)
+  inputs.file(providedFile)
   doLast {
     def entries = new java.util.zip.ZipFile(zip.get().asFile).withCloseable { z -> z.entries().collect { it.name.tokenize('/').last() } }
     def required = [
       ~/besu-graphql-plugin-.*\.jar/,
       ~/graphql-java-.*\.jar/,
-      ~/java-dataloader-.*\.jar/
+      ~/java-dataloader-.*\.jar/,
+      ~/LICENSE/,
+      ~/NOTICE/
     ]
     required.each { pattern ->
       if (!entries.any { it ==~ pattern }) {
         throw new GradleException("Plugin distribution ${zip.get().asFile} has no entry matching ${pattern}: ${entries}")
       }
     }
-    def unexpected = entries.findAll { it ==~ /(besu-plugin-api|besu-datatypes|vertx-core|jackson-databind|guava|picocli|reactive-streams|jspecify)-.*\.jar/ }
+    // Besu's own artifacts are never on the runtime class path, and must never be shipped.
+    def unexpected = entries.findAll { it ==~ /(besu-.*|plugin-api|datatypes|evm)-[0-9].*\.jar/ && !(it ==~ /besu-graphql-plugin-.*\.jar/) }
+    // Neither must any library that the targeted Besu provides (besuPlugin's list, without the
+    // libraries the plugin always ships, see alwaysShipped): Besu loads its own copy first.
+    def provided = providedFile.get().asFile.readLines()*.trim().findAll { it } as Set
+    runtimeArtifacts.artifacts.each { artifact ->
+      def id = artifact.id.componentIdentifier
+      if (id instanceof ModuleComponentIdentifier && provided.contains("${id.group}:${id.module}".toString())
+      && entries.contains(artifact.file.name)) {
+        unexpected << artifact.file.name
+      }
+    }
     if (!unexpected.isEmpty()) {
       throw new GradleException("Plugin distribution contains jars that Besu provides: ${unexpected}")
     }
   }
 }
 
-// The README documents the Besu version the plugin is built against.
+// The main code may use only Besu's plugin API and the types it exposes, never Besu internals: the
+// plugin is loaded by a class loader that sees all of Besu, so internals would compile, pass the
+// tests and work, until Besu changes them. The tests may use Besu internals.
+def verifyPluginApiOnly = tasks.register('verifyPluginApiOnly') {
+  description = 'Verifies that the main code uses only the Besu plugin API, not Besu internals.'
+  group = 'verification'
+  def sources = fileTree('src/main/java') { include '**/*.java' }
+  // Propose an addition here only with a review of the Besu types concerned (see CONTRIBUTING.md).
+  def allowed = [
+    'org.hyperledger.besu.plugin',
+    'org.hyperledger.besu.plugins.graphql',
+    'org.hyperledger.besu.datatypes',
+    // EVM types exposed by the plugin API (WorldStateService, TransactionSimulationService)
+    'org.hyperledger.besu.evm.account',
+    'org.hyperledger.besu.evm.worldstate',
+    'org.hyperledger.besu.evm.tracing',
+  ]
+  inputs.files(sources)
+  inputs.property('allowed', allowed)
+  doLast {
+    def violations = []
+    sources.files.sort().each { file ->
+      file.readLines().eachWithIndex { line, index ->
+        (line =~ /org\.hyperledger\.besu\.[A-Za-z0-9_.]*[A-Za-z0-9_]/).each { String reference ->
+          if (!allowed.any { reference == it || reference.startsWith(it + '.') }) {
+            violations << "${file}:${index + 1}: ${reference}"
+          }
+        }
+      }
+    }
+    if (!violations.isEmpty()) {
+      throw new GradleException("The main code may only use Besu's plugin API (see CONTRIBUTING.md, \"Plugin API only\"):\n  " + violations.join('\n  '))
+    }
+  }
+}
+
+// The compatibility table of the README documents the Besu version the plugin is built against:
+// its first row, the current version of the plugin, must name it.
 def verifyReadmeBesuVersion = tasks.register('verifyReadmeBesuVersion') {
-  description = 'Verifies that README.md names the Besu version from gradle/libs.versions.toml.'
+  description = 'Verifies that the first row of the README compatibility table names the Besu version from gradle/libs.versions.toml.'
   group = 'verification'
   def expected = libs.versions.besu.asProvider().get()
   def readmeFile = layout.projectDirectory.file('README.md').asFile
   inputs.file(readmeFile)
   inputs.property('expectedVersion', expected)
   doLast {
-    if (!readmeFile.text.contains("`${expected}`")) {
+    def lines = readmeFile.readLines()
+    def header = lines.findIndexOf { it.startsWith('| Plugin version |') }
+    def row = header >= 0 && header + 2 < lines.size() ? lines[header + 2] : null
+    def cells = row?.startsWith('|') ? row.split(/\|/)*.trim().findAll { it } : []
+    if (cells.size() < 2 || !cells[1].contains("`${expected}`")) {
       throw new GradleException(
-      "README.md does not mention the Besu version `${expected}` from gradle/libs.versions.toml. Update README.md.")
+      "The first row of the compatibility table in README.md must name, in its second column, the Besu version `${expected}`" +
+      " from gradle/libs.versions.toml: ${row}")
     }
   }
 }
 
 tasks.named('check') {
-  dependsOn verifyDistribution, verifyReadmeBesuVersion
+  dependsOn verifyDistribution, verifyReadmeBesuVersion, verifyPluginApiOnly
 }
 
 publishing {

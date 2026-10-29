@@ -1,0 +1,14 @@
+Besu GraphQL plugin
+Copyright contributors to Besu.
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+The plugin distribution also contains the following third-party libraries, each under its own
+license:
+
+- graphql-java (com.graphql-java:graphql-java), https://github.com/graphql-java/graphql-java
+  MIT License, Copyright (c) 2015 Andreas Marek and Contributors
+  (the license text is LICENSE.md in graphql-java-<version>.jar; the jar also contains
+  libraries it relocated, under the Apache License, Version 2.0, see its META-INF/LICENSE)
+- java-dataloader (com.graphql-java:java-dataloader), https://github.com/graphql-java/java-dataloader
+  Apache License, Version 2.0 (see LICENSE)
