@@ -200,6 +200,11 @@ tasks.named('resolveBesuProvidedDependencies') {
   }
 }
 
+// The plugin is distributed as a zip only.
+tasks.named('distTar') {
+  enabled = false
+}
+
 def verifyDistribution = tasks.register('verifyDistribution') {
   description = 'Verifies that the plugin distribution contains the plugin jar and graphql-java.'
   group = 'verification'
@@ -257,6 +262,8 @@ publishing {
         }
       }
       pom {
+        // The distribution zip is a second unclassified artifact; the main artifact is the jar.
+        packaging = 'jar'
         name = 'Besu GraphQL plugin'
         description = 'EIP-1767 GraphQL API for Hyperledger Besu, as a Besu plugin.'
         url = 'https://github.com/jflo/besu-graphql-plugin'
