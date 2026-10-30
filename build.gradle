@@ -75,6 +75,18 @@ dependencies {
   testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
+// besuPlugin adds the enforced Besu BOM (and auto-service) to the main annotation processor path,
+// which Error Prone runs from. The BOM's strict versions would replace Error Prone and its own
+// dependencies (protobuf-java, caffeine, ...) with Besu's for the main code only, so the main code
+// would be checked by a different Error Prone classpath than the tests. The processor path never
+// reaches the published POM or the distribution, so drop the BOM from it; auto-service keeps the
+// version besuPlugin declares for it.
+configurations.named('annotationProcessor') {
+  withDependencies { deps ->
+    deps.removeIf { it.group == 'org.hyperledger.besu' && it.name == 'bom' }
+  }
+}
+
 // Same compiler checks as Besu.
 tasks.withType(JavaCompile).configureEach {
   options.compilerArgs += [
