@@ -247,6 +247,9 @@ public class GraphQLCliOptions {
    *
    * @return the command line, or null if the options were not added to a command
    */
+  // Identity is intended: the options belong to another command when their CommandSpec is not
+  // this mixin's own instance.
+  @SuppressWarnings("ReferenceEquality")
   public synchronized CommandLine getCommandLine() {
     if (registeredSpec == null) {
       return null;
@@ -254,7 +257,7 @@ public class GraphQLCliOptions {
     final CommandSpec ownSpec = registeredSpec;
     return ownSpec.options().stream()
         .map(OptionSpec::command)
-        .filter(command -> command != null && !command.equals(ownSpec))
+        .filter(command -> command != null && command != ownSpec)
         .map(CommandSpec::commandLine)
         .filter(Objects::nonNull)
         .findFirst()
@@ -449,9 +452,12 @@ public class GraphQLCliOptions {
         + optionName.substring("--".length()).replace('-', '_').toUpperCase(Locale.US);
   }
 
+  // Identity is intended: an option was added to another command when its CommandSpec is not the
+  // given instance.
+  @SuppressWarnings("ReferenceEquality")
   private static boolean isAddedToAnotherCommand(final CommandSpec spec) {
     return spec.options().stream()
-        .anyMatch(option -> option.command() != null && !option.command().equals(spec));
+        .anyMatch(option -> option.command() != null && option.command() != spec);
   }
 
   /**
