@@ -11,7 +11,7 @@ besu-plugin-distribution = "0.3.0"
 # graphql-java is not provided by Besu once Besu drops its core GraphQL service, so the plugin
 # declares and ships it (and java-dataloader) itself. Keep in step with the GraphQL schema features.
 graphql-java = "26.1"
-java-dataloader = "3.3.0"
+java-dataloader = "6.0.0"
 
 spotless = "8.5.1"
 # Same formatter version as Besu, so code moves between the repositories without reformatting.
