@@ -203,6 +203,73 @@ tasks.named('resolveBesuProvidedDependencies') {
   }
 }
 
+// The plugin ships graphql-java and java-dataloader in its distribution and publishes them as its
+// runtime dependencies. gradle/libs.versions.toml must state the versions the plugin is really
+// compiled, tested, shipped and published with. Besu versions that still have their own GraphQL
+// service pin graphql-java 22.3 and java-dataloader 3.3.0 in the Besu BOM that besuPlugin enforces,
+// and in Besu's artifacts catalog, which silently overrides any other version declared here.
+// verifyShippedLibraryVersions fails the build when anything (that BOM, the catalog, or a
+// transitive dependency) selects another version on one of these class paths. Each graphql-java
+// version needs a specific java-dataloader version, so the two are updated together.
+def shippedLibraries = [libs.graphql.java, libs.java.dataloader].collect { it.get() }
+def guardedClasspaths = [
+  'compileClasspath',
+  'runtimeClasspath',
+  'testCompileClasspath',
+  'testRuntimeClasspath',
+  'integrationTestCompileClasspath',
+  'integrationTestRuntimeClasspath',
+]
+def verifyShippedLibraryVersions = tasks.register('verifyShippedLibraryVersions') {
+  description = 'Verifies that the libraries the plugin ships resolve to their versions in gradle/libs.versions.toml.'
+  group = 'verification'
+  def expected = shippedLibraries.collectEntries { [(it.module.toString()): it.versionConstraint.requiredVersion] }
+  def roots = guardedClasspaths.collectEntries { name ->
+    [(name): configurations.named(name).flatMap { it.incoming.resolutionResult.rootComponent }]
+  }
+  inputs.property('expected', expected)
+  doLast {
+    def problems = []
+    roots.each { name, root ->
+      def seen = [] as Set
+      def found = [] as Set
+      def todo = [root.get()]
+      while (!todo.isEmpty()) {
+        def component = todo.pop()
+        if (!seen.add(component.id)) {
+          continue
+        }
+        def module = "${component.moduleVersion.group}:${component.moduleVersion.name}".toString()
+        if (expected.containsKey(module)) {
+          found << module
+          if (component.moduleVersion.version != expected[module]) {
+            problems << "${name}: ${module} resolves to ${component.moduleVersion.version}, not ${expected[module]}" +
+                " (${component.selectionReason.descriptions*.description.join('; ')})"
+          }
+        }
+        component.dependencies.each {
+          if (it instanceof org.gradle.api.artifacts.result.ResolvedDependencyResult) {
+            todo << it.selected
+          } else if (it instanceof org.gradle.api.artifacts.result.UnresolvedDependencyResult) {
+            def requested = it.requested
+            if (requested instanceof ModuleComponentSelector && expected.containsKey(requested.moduleIdentifier.toString())
+            && found.add(requested.moduleIdentifier.toString())) {
+              problems << "${name}: ${requested.moduleIdentifier} cannot be resolved: ${it.failure.message.readLines().first()}"
+            }
+          }
+        }
+      }
+      (expected.keySet() - found).each { problems << "${name}: ${it} is missing" }
+    }
+    if (!problems.isEmpty()) {
+      throw new GradleException('The libraries the plugin ships must resolve to their versions in gradle/libs.versions.toml' +
+      ' (see CONTRIBUTING.md, "graphql-java"):\n  ' + problems.join('\n  '))
+    }
+  }
+}
+// The jar (which embeds the plugin artifacts catalog), distZip and every publication depend on it.
+tasks.named('collectPluginOnlyRuntimeArtifacts') { dependsOn verifyShippedLibraryVersions }
+
 // The plugin is distributed as a zip only, with its license and the notices of the libraries it ships.
 tasks.named('distTar') {
   enabled = false
@@ -315,7 +382,7 @@ def verifyReadmeBesuVersion = tasks.register('verifyReadmeBesuVersion') {
 }
 
 tasks.named('check') {
-  dependsOn verifyDistribution, verifyReadmeBesuVersion, verifyPluginApiOnly
+  dependsOn verifyDistribution, verifyReadmeBesuVersion, verifyPluginApiOnly, verifyShippedLibraryVersions
 }
 
 publishing {
