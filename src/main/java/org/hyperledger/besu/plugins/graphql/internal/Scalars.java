@@ -247,22 +247,29 @@ public class Scalars {
   private static final Coercing<String, String> BIG_INT_COERCING =
       new Coercing<>() {
         private String convertImpl(final Object input) {
-          if (input instanceof String string) {
-            try {
-              return Bytes.fromHexStringLenient(string).toShortHexString();
-            } catch (IllegalArgumentException iae) {
+          switch (input) {
+            case String string -> {
+              try {
+                return Bytes.fromHexStringLenient(string).toShortHexString();
+              } catch (IllegalArgumentException iae) {
+                return null;
+              }
+            }
+            case Bytes bytes -> {
+              return bytes.toShortHexString();
+            }
+            case StringValue stringValue -> {
+              return convertImpl(stringValue.getValue());
+            }
+            case IntValue intValue -> {
+              return UInt256.valueOf(intValue.getValue()).toShortHexString();
+            }
+            case BigInteger bigInteger -> {
+              return "0x" + bigInteger.toString(16);
+            }
+            case null, default -> {
               return null;
             }
-          } else if (input instanceof Bytes bytes) {
-            return bytes.toShortHexString();
-          } else if (input instanceof StringValue stringValue) {
-            return convertImpl(stringValue.getValue());
-          } else if (input instanceof IntValue intValue) {
-            return UInt256.valueOf(intValue.getValue()).toShortHexString();
-          } else if (input instanceof BigInteger bigInteger) {
-            return "0x" + bigInteger.toString(16);
-          } else {
-            return null;
           }
         }
 
@@ -320,7 +327,7 @@ public class Scalars {
                   "Bytes value '" + input + "' is not prefixed with 0x");
             }
             try {
-              return Bytes.fromHexStringLenient((String) input);
+              return Bytes.fromHexStringLenient(string);
             } catch (IllegalArgumentException iae) {
               return null;
             }
@@ -437,29 +444,35 @@ public class Scalars {
   private static final Coercing<Bytes32, String> BYTES32_COERCING =
       new Coercing<>() {
         private Bytes32 convertImpl(final Object input) {
-          if (input instanceof Bytes32 bytes32) {
-            return bytes32;
-          } else if (input instanceof Bytes bytes) {
-            if (bytes.size() <= 32) {
-              return Bytes32.leftPad((Bytes) input);
-            } else {
-              return null;
+          switch (input) {
+            case Bytes32 bytes32 -> {
+              return bytes32;
             }
-          } else if (input instanceof StringValue stringValue) {
-            return convertImpl(stringValue.getValue());
-          } else if (input instanceof String string) {
-            if (!isHexPrefixed(string)) {
-              throw new CoercingParseLiteralException(
-                  "Bytes32 value '" + input + "' is not prefixed with 0x");
-            } else {
-              try {
-                return Bytes32.fromHexStringLenient((String) input);
-              } catch (IllegalArgumentException iae) {
+            case Bytes bytes -> {
+              if (bytes.size() <= 32) {
+                return Bytes32.leftPad(bytes);
+              } else {
                 return null;
               }
             }
-          } else {
-            return null;
+            case StringValue stringValue -> {
+              return convertImpl(stringValue.getValue());
+            }
+            case String string -> {
+              if (!isHexPrefixed(string)) {
+                throw new CoercingParseLiteralException(
+                    "Bytes32 value '" + input + "' is not prefixed with 0x");
+              } else {
+                try {
+                  return Bytes32.fromHexStringLenient(string);
+                } catch (IllegalArgumentException iae) {
+                  return null;
+                }
+              }
+            }
+            case null, default -> {
+              return null;
+            }
           }
         }
 

@@ -75,6 +75,15 @@ dependencies {
   testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
+// besuPlugin adds the enforced Besu BOM (and auto-service) to the main annotation processor path,
+// which Error Prone runs from; the BOM's error_prone_core and error_prone_annotations would
+// otherwise replace the versions above for the main code only, so it would be checked by an older
+// Error Prone than the tests.
+configurations.named('annotationProcessor') {
+  resolutionStrategy.force(libs.errorprone.core,
+      "com.google.errorprone:error_prone_annotations:${libs.versions.errorprone.asProvider().get()}")
+}
+
 // Same compiler checks as Besu.
 tasks.withType(JavaCompile).configureEach {
   options.compilerArgs += [

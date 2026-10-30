@@ -382,7 +382,7 @@ public class GraphQLHttpService {
       final HttpServerRequest request = routingContext.request();
 
       switch (request.method().name()) {
-        case "GET":
+        case "GET" -> {
           final String queryString = request.getParam("query");
           query = Objects.requireNonNullElse(queryString, "");
           operationName = request.getParam("operationName");
@@ -396,8 +396,8 @@ public class GraphQLHttpService {
           } else {
             variables = Collections.emptyMap();
           }
-          break;
-        case "POST":
+        }
+        case "POST" -> {
           final String contentType = request.getHeader(HttpHeaders.CONTENT_TYPE);
           if (contentType != null && MediaType.parse(contentType).is(MEDIA_TYPE_JUST_JSON)) {
             final String requestBody = routingContext.body().asString().trim();
@@ -415,13 +415,14 @@ public class GraphQLHttpService {
             operationName = null;
             variables = Collections.emptyMap();
           }
-          break;
-        default:
+        }
+        default -> {
           routingContext
               .response()
               .setStatusCode(HttpResponseStatus.METHOD_NOT_ALLOWED.code())
               .end();
           return;
+        }
       }
 
       final HttpServerResponse response = routingContext.response();

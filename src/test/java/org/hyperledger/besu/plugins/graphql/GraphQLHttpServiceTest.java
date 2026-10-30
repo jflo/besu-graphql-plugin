@@ -131,7 +131,7 @@ public class GraphQLHttpServiceTest {
     service
         .start()
         .whenComplete(
-            (unused, exception) -> assertThat(exception).isInstanceOf(IllegalStateException.class));
+            (_, exception) -> assertThat(exception).isInstanceOf(IllegalStateException.class));
   }
 
   @Test

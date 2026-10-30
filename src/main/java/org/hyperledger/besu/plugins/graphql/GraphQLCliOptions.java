@@ -254,7 +254,7 @@ public class GraphQLCliOptions {
     final CommandSpec ownSpec = registeredSpec;
     return ownSpec.options().stream()
         .map(OptionSpec::command)
-        .filter(command -> command != null && command != ownSpec)
+        .filter(command -> command != null && !command.equals(ownSpec))
         .map(CommandSpec::commandLine)
         .filter(Objects::nonNull)
         .findFirst()
@@ -451,7 +451,7 @@ public class GraphQLCliOptions {
 
   private static boolean isAddedToAnotherCommand(final CommandSpec spec) {
     return spec.options().stream()
-        .anyMatch(option -> option.command() != null && option.command() != spec);
+        .anyMatch(option -> option.command() != null && !option.command().equals(spec));
   }
 
   /**
