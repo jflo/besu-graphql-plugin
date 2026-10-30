@@ -58,3 +58,22 @@ Maintainers merge with squash merges.
 - [Besu contribution guidelines](https://github.com/besu-eth/besu/blob/main/CONTRIBUTING.md)
 - [Besu plugin API](https://github.com/besu-eth/besu/tree/main/plugin-api)
 - [Besu Discord](https://discord.com/invite/hyperledger)
+
+## graphql-java
+
+The plugin ships graphql-java and java-dataloader itself, at the versions in
+`gradle/libs.versions.toml`. They are held at the versions Besu's former core GraphQL service used
+(graphql-java 22.3, java-dataloader 3.3.0), for two reasons:
+
+- While the plugin's minimum Besu version still contains Besu's own GraphQL service, the Besu BOM
+  that the build enforces pins those versions. Any other version declared in the catalog would be
+  silently replaced; `verifyShippedLibraryVersions` (part of `./gradlew build`) fails the build
+  instead.
+- Newer graphql-java majors change some responses (for example introspection output, the
+  validation of unsupported operations and some error messages), and the plugin promises the same
+  responses as Besu's former core service.
+
+Dependabot ignores `com.graphql-java:*` until then. To update: build against a Besu whose BOM no
+longer lists graphql-java, update graphql-java and java-dataloader together (each graphql-java
+version requires one java-dataloader version), keep every fixture under `src/test/resources`
+byte-identical, and record any response change in the changelog.

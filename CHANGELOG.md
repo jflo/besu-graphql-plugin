@@ -8,6 +8,14 @@ plugin; each entry names the Besu version it was built and tested against.
 Built against Besu `26.11.0-graphqlapi-SNAPSHOT` (besu-eth/besu#11744); requires the first Besu
 release that contains besu-eth/besu#11744.
 
+### Changed
+- graphql-java is held at 22.3 and java-dataloader at 3.3.0, the versions of Besu's former core
+  GraphQL service. The earlier catalog bump to graphql-java 26.1 never took effect: the Besu BOM
+  the build enforces kept 22.3 on every class path and in the distribution. A new build check,
+  `verifyShippedLibraryVersions`, fails the build if the versions built and shipped differ from the
+  catalog, and Dependabot ignores graphql-java until the plugin's minimum Besu has no GraphQL
+  service of its own (see `CONTRIBUTING.md`).
+
 ### Added
 - Initial extraction of Besu's GraphQL API (EIP-1767) from Besu into this standalone plugin
   repository, with the history of Besu's core GraphQL sources (see `docs/HISTORY.md`). The plugin

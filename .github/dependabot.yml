@@ -14,3 +14,7 @@ updates:
       interval: weekly
     ignore:
       - dependency-name: "org.hyperledger.besu*"
+      # graphql-java and java-dataloader stay at the versions Besu's own GraphQL service uses until
+      # the plugin's minimum Besu no longer has that service (its BOM pins them, so an update here
+      # would not change what is built), see CONTRIBUTING.md, "graphql-java".
+      - dependency-name: "com.graphql-java:*"
