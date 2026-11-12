@@ -13,7 +13,7 @@ besu-plugin-distribution = "0.3.0"
 graphql-java = "26.1"
 java-dataloader = "3.3.0"
 
-spotless = "8.5.1"
+spotless = "8.11.0"
 # Same formatter version as Besu, so code moves between the repositories without reformatting.
 google-java-format = "1.35.0"
 errorprone = "2.36.0"
